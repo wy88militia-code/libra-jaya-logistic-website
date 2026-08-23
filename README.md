@@ -6,3 +6,4 @@ Website profil perusahaan PT Libra Jaya Logistic. Dibangun sebagai situs statis 
 
 - Build command: kosong
 - Publish directory: `.`
+- Admin Tool menggunakan autentikasi server-side Netlify Functions.
