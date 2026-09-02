@@ -1,0 +1,28 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Admin Libra | PT Libra Jaya Logistic</title>
+  <link rel="icon" type="image/webp" href="logo-libra-jaya.webp">
+  <link rel="stylesheet" href="admin-login.css">
+</head>
+<body>
+  <main class="login-card">
+    <img src="logo-libra-jaya.webp" alt="Logo PT Libra Jaya Logistic">
+    <p class="eyebrow">ADMIN LIBRA — AKSES TERBATAS</p>
+    <h1>Admin Libra</h1>
+    <p class="intro">Backend PT Libra Jaya Logistic untuk partner, deposit, rute, booking, tracking, POD, klaim, dan API. Ini terpisah dari Admin JL Express.</p>
+    <form id="admin-login-form">
+      <div class="field"><label for="admin-user">Username</label><input id="admin-user" name="username" type="text" autocomplete="username" value="admin" maxlength="80" required autofocus></div>
+      <div class="field"><label for="admin-pin">PIN Admin Libra</label><input id="admin-pin" class="digits" name="pin" type="password" inputmode="numeric" autocomplete="current-password" minlength="6" maxlength="12" required></div>
+      <div class="field"><label for="admin-otp">OTP 6 digit <span>(jika aktif)</span></label><input id="admin-otp" class="digits" name="otp" type="text" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}" placeholder="000000"></div>
+      <button type="submit">Masuk Admin Libra</button>
+      <p id="login-status" role="alert" aria-live="polite"></p>
+    </form>
+    <a class="back" href="/">← Kembali ke website Libra</a>
+  </main>
+  <script src="admin-login.js"></script>
+</body>
+</html>
