@@ -1,0 +1,9 @@
+{
+  "name": "libra-jaya-logistic-website",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@netlify/blobs": "^11.0.2"
+  }
+}
