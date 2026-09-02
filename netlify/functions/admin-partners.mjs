@@ -1,4 +1,4 @@
-import { getWallet, listPartners, makeApiCredentials, newPinHash, normalizePartnerId, normalizePhone, savePartner, validAdminSession } from './_partner-core.mjs';
+import { getPartner, getWallet, listPartners, makeApiCredentials, newPinHash, normalizePartnerId, normalizePhone, savePartner, validAdminSession } from './_partner-core.mjs';
 
 function escapeHtml(value) {
   return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
@@ -22,6 +22,7 @@ export default async (request) => {
   const form = await request.formData();
   const partnerId = normalizePartnerId(form.get('partnerId'));
   if (!partnerId) return new Response(render(await loadRows(), 'Partner ID tidak valid.'), { status: 400, headers: { 'content-type': 'text/html; charset=utf-8' } });
+  if (await getPartner(partnerId)) return new Response(render(await loadRows(), 'Partner ID sudah terdaftar. Gunakan ID lain atau lakukan reset melalui modul administrasi.'), { status: 409, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
   const credentials = makeApiCredentials();
   const pin = newPinHash(form.get('pin'));
   const partner = {
