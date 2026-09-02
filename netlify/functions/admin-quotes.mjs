@@ -1,0 +1,23 @@
+import { approveQuote, listQuotes } from './_quote-core.mjs';
+import { validAdminSession } from './_partner-core.mjs';
+
+function esc(value){return String(value??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
+function money(value){return value===null||value===undefined?'—':'Rp'+Number(value).toLocaleString('id-ID');}
+function render(quotes,message='',error=''){
+  const rows=quotes.map(q=>`<tr><td><strong>${esc(q.quoteId)}</strong><small>${esc(q.partnerId)}</small></td><td>${esc(q.kelurahan)}<small>${esc(q.distrik)} • ${esc(q.kodeRute)}</small></td><td>${Number(q.weightKg).toLocaleString('id-ID')} kg</td><td><span class="status ${q.status==='APPROVED'?'good':q.status==='PENDING_APPROVAL'?'warn':q.status==='BOOKED'?'good':'neutral'}">${esc(q.status)}</span><small>${esc(q.coverageStatus)}</small></td><td>${money(q.amount)}</td><td>${esc(q.sla||'—')}</td><td>${q.status==='PENDING_APPROVAL'?`<form method="post" class="approve"><input type="hidden" name="quoteId" value="${esc(q.quoteId)}"><input name="amount" inputmode="numeric" placeholder="Nominal Rp" required><input name="note" placeholder="Catatan admin"><button>Approve</button></form>`:esc(q.bookingId||'—')}</td></tr>`).join('');
+  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Quote & Booking | Libra Admin</title><style>*{box-sizing:border-box}body{margin:0;font-family:Inter,system-ui;background:#f2f6fa;color:#10243d}.top{background:#061d36;color:#fff;padding:18px 22px}.topin{max-width:1250px;margin:auto;display:flex;justify-content:space-between}.top a{color:#fff}.wrap{max-width:1250px;margin:auto;padding:24px 18px 50px}.hero{display:flex;justify-content:space-between;gap:18px;align-items:flex-end}.hero h1{margin:0 0 6px}.hero p{margin:0;color:#63778a}.notice{margin:16px 0;padding:12px 14px;border-radius:10px;background:#e8f4ff}.notice.err{background:#fff0ef}.card{margin-top:18px;background:#fff;border:1px solid #dbe5ee;border-radius:17px;overflow:hidden}.tablewrap{overflow:auto}table{width:100%;border-collapse:collapse;font-size:13px;min-width:980px}th,td{padding:11px 12px;border-bottom:1px solid #edf1f5;text-align:left;vertical-align:top}th{background:#f7fafc}small{display:block;color:#718397;margin-top:4px}.status{display:inline-block;padding:5px 8px;border-radius:999px;font-size:11px;font-weight:800}.good{background:#e4f6ea;color:#176b37}.warn{background:#fff5d7;color:#86620c}.neutral{background:#edf2f6}.approve{display:grid;grid-template-columns:120px 170px auto;gap:6px}.approve input,.approve button{font:inherit;padding:8px;border-radius:8px;border:1px solid #cbd8e6}.approve button{background:#167348;color:#fff;border:0;font-weight:800}.empty{padding:28px;color:#65788b}@media(max-width:700px){.hero{flex-direction:column;align-items:flex-start}}</style></head><body><header class="top"><div class="topin"><strong>LIBRA JAYA LOGISTIC • Quote & Booking</strong><a href="/admin-tool">← Home Admin</a></div></header><main class="wrap"><section class="hero"><div><h1>Quote & Booking Control</h1><p>Harga booking hanya berasal dari quote backend. Partner tidak dapat menentukan nominal debit.</p></div></section>${message?`<div class="notice">${esc(message)}</div>`:''}${error?`<div class="notice err">${esc(error)}</div>`:''}<section class="card">${rows?`<div class="tablewrap"><table><thead><tr><th>Quote / Partner</th><th>Tujuan</th><th>Berat</th><th>Status</th><th>Nominal</th><th>SLA</th><th>Aksi / Booking</th></tr></thead><tbody>${rows}</tbody></table></div>`:'<div class="empty">Belum ada quote partner.</div>'}</section></main></body></html>`;
+}
+
+export default async request=>{
+  if(!validAdminSession(request))return Response.redirect(new URL('/admin-login.html',request.url),302);
+  let message='',error='';
+  if(request.method==='POST'){
+    const form=await request.formData();
+    try{const quote=await approveQuote(String(form.get('quoteId')||''),form.get('amount'),form.get('note'));message=`${quote.quoteId} disetujui ${money(quote.amount)} dan berlaku 30 menit.`;}
+    catch(err){error=err?.message||'Quote gagal disetujui.';}
+  }else if(request.method!=='GET')return new Response('Method not allowed',{status:405});
+  const quotes=await listQuotes(200);
+  return new Response(render(quotes,message,error),{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY','content-security-policy':"default-src 'none'; style-src 'unsafe-inline'; base-uri 'none'; form-action 'self'; frame-ancestors 'none'"}});
+};
+
+export const config={path:'/admin-quotes'};
