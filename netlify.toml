@@ -1,6 +1,16 @@
 [build]
   publish = "."
 
+[[redirects]]
+  from = "/partner/manual-booking"
+  to = "/partner/login.html?next=/partner/booking.html"
+  status = 302
+
+[[redirects]]
+  from = "/partner/api-onboarding"
+  to = "/partner/api-onboarding.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
@@ -15,7 +25,7 @@
   [headers.values]
     Permissions-Policy = "camera=(self), microphone=(), geolocation=(self)"
 
-# Backend kurir nantinya menggunakan GPS dan kamera untuk POD.
+# Backend kurir menggunakan GPS dan kamera untuk POD.
 [[headers]]
   for = "/admin-courier*"
   [headers.values]
