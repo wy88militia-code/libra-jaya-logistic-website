@@ -8,3 +8,15 @@
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+# Booking partner membutuhkan GPS tujuan untuk mengunci lokasi/kelurahan.
+[[headers]]
+  for = "/partner/*"
+  [headers.values]
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(self)"
+
+# Backend kurir nantinya menggunakan GPS dan kamera untuk POD.
+[[headers]]
+  for = "/admin-courier*"
+  [headers.values]
+    Permissions-Policy = "camera=(self), microphone=(), geolocation=(self)"
