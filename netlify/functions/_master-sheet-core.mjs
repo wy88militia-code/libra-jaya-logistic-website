@@ -15,8 +15,10 @@ function normalizePrivateKey(value){
 
 function cell(row,index){return row?.[index]??'';}
 function numberOrNull(value){
-  const normalized=String(value??'').replace(/\./g,'').replace(',','.').replace(/[^0-9.-]/g,'');
+  let normalized=String(value??'').trim().replace(/\s/g,'').replace(/[^0-9,.-]/g,'');
   if(!normalized)return null;
+  if(normalized.includes(',')&&normalized.includes('.'))normalized=normalized.replace(/\./g,'').replace(',','.');
+  else if(normalized.includes(','))normalized=normalized.replace(',','.');
   const number=Number(normalized);
   return Number.isFinite(number)?number:null;
 }
