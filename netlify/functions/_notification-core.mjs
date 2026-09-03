@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
+import { queueExternalAlert } from './_external-alert-core.mjs';
 
 const STORE_NAME='libra-notifications';
 const store=()=>getStore(STORE_NAME);
@@ -17,14 +18,15 @@ async function createForAudience(audience,input={}){
     if(!claimed.modified)return null;
   }
   const id=notificationId();const createdAt=now();
-  const record={notificationId:id,audience,type:clean(input.type,80)||'INFO',severity:['INFO','WARNING','CRITICAL','SUCCESS'].includes(String(input.severity||'').toUpperCase())?String(input.severity).toUpperCase():'INFO',title:clean(input.title,160),message:clean(input.message,1200),partnerId:normalizePartnerId(input.partnerId)||null,reference:clean(input.reference,160)||null,link:clean(input.link,300)||null,metadata:input.metadata&&typeof input.metadata==='object'?input.metadata:null,readAt:null,createdAt,updatedAt:createdAt};
+  const record={notificationId:id,audience,type:clean(input.type,80)||'INFO',severity:['INFO','WARNING','CRITICAL','SUCCESS'].includes(String(input.severity||'').toUpperCase())?String(input.severity).toUpperCase():'INFO',title:clean(input.title,160),message:clean(input.message,1200),partnerId:normalizePartnerId(input.partnerId)||null,reference:clean(input.reference,160)||null,link:clean(input.link,300)||null,metadata:input.metadata&&typeof input.metadata==='object'?input.metadata:null,external:input.external===false?false:true,readAt:null,createdAt,updatedAt:createdAt};
   await store().setJSON(`${audience}/${id}`,record,{onlyIfNew:true});return record;
 }
 
+async function maybeQueueExternal(row){if(!row||row.external===false)return;try{await queueExternalAlert(row);}catch(error){console.error(JSON.stringify({event:'LIBRA_EXTERNAL_ALERT_QUEUE_FAILED',notificationId:row.notificationId,error:String(error?.message||error).slice(0,500)}));}}
 export async function createOperationalNotification(input={}){
   const id=normalizePartnerId(input.partnerId);const rows=[];
-  if(input.notifyPartner!==false&&id){const row=await createForAudience(`partner/${id}`,{...input,partnerId:id,link:input.partnerLink||input.link||null,dedupeKey:input.dedupeKey?`partner:${id}:${input.dedupeKey}`:''});if(row)rows.push(row);}
-  if(input.notifyAdmin!==false){const row=await createForAudience('admin',{...input,partnerId:id,link:input.adminLink||input.link||null,dedupeKey:input.dedupeKey?`admin:${input.dedupeKey}`:''});if(row)rows.push(row);}
+  if(input.notifyPartner!==false&&id){const row=await createForAudience(`partner/${id}`,{...input,partnerId:id,link:input.partnerLink||input.link||null,dedupeKey:input.dedupeKey?`partner:${id}:${input.dedupeKey}`:''});if(row){rows.push(row);await maybeQueueExternal(row);}}
+  if(input.notifyAdmin!==false){const row=await createForAudience('admin',{...input,partnerId:id,link:input.adminLink||input.link||null,dedupeKey:input.dedupeKey?`admin:${input.dedupeKey}`:''});if(row){rows.push(row);await maybeQueueExternal(row);}}
   return rows;
 }
 
