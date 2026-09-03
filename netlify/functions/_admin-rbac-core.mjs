@@ -4,6 +4,7 @@ export function normalizeAdminRole(value){return ROLE_ALIASES[String(value||'').
 
 const PATH_ROLES=[
  [/^\/(?:libra-admin|admin-tool)$/,ADMIN_ROLES],
+ [/^\/courier$/,['SUPERADMIN','OPS','COURIER']],
  [/^\/admin-partners$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-rate-plans$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-reconciliation$/,['SUPERADMIN','FINANCE']],
