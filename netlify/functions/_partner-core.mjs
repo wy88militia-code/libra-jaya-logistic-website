@@ -1,5 +1,6 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
+import { canRoleAccessPath, normalizeAdminRole } from './_admin-rbac-core.mjs';
 import { createOperationalNotification } from './_notification-core.mjs';
 
 export const PARTNER_COOKIE='libra_partner_session';
@@ -28,7 +29,7 @@ export function issuePartnerSession(partnerId){const secret=process.env.PARTNER_
 export function clearPartnerSession(){return `${PARTNER_COOKIE}=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict`;}
 export async function requirePartnerSession(request){const token=readCookie(request,PARTNER_COOKIE);const secret=process.env.PARTNER_SESSION_SECRET;if(!token||!secret)return null;const [payload,signature]=token.split('.');if(!payload||!signature)return null;const expected=hmac(payload,secret);if(!safeEqual(signature,expected))return null;try{const data=JSON.parse(Buffer.from(payload,'base64url').toString());if(!data?.partnerId||data.expires<=Math.floor(Date.now()/1000))return null;const partner=await getPartner(data.partnerId);if(!partner||partner.status!=='ACTIVE')return null;return partner;}catch{return null;}}
 
-export function getAdminSession(request){const token=readCookie(request,'libra_admin_session');const secret=process.env.ADMIN_SESSION_SECRET;if(!token||!secret)return null;const [payload,signature]=token.split('.');if(!payload||!signature)return null;if(!safeEqual(signature,hmac(payload,secret)))return null;try{const data=JSON.parse(Buffer.from(payload,'base64url').toString());if(data.expires<=Math.floor(Date.now()/1000))return null;return {username:data.username||'legacy-admin',role:data.role||'SUPERADMIN',expires:data.expires};}catch{return null;}}
+export function getAdminSession(request){const token=readCookie(request,'libra_admin_session');const secret=process.env.ADMIN_SESSION_SECRET;if(!token||!secret)return null;const [payload,signature]=token.split('.');if(!payload||!signature)return null;if(!safeEqual(signature,hmac(payload,secret)))return null;try{const data=JSON.parse(Buffer.from(payload,'base64url').toString());if(data.expires<=Math.floor(Date.now()/1000))return null;const role=normalizeAdminRole(data.role||'SUPERADMIN');let pathname='/';try{pathname=new URL(request.url).pathname;}catch{}if(!canRoleAccessPath(role,pathname))return null;return {username:data.username||'legacy-admin',role,otp:Boolean(data.otp),expires:data.expires};}catch{return null;}}
 export function validAdminSession(request){return Boolean(getAdminSession(request));}
 
 function walletStore(){return getStore(WALLET_STORE);}
