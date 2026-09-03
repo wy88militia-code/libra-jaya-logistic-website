@@ -35,6 +35,9 @@ function legacyRate(route){
 
 export async function getRatePlan(partnerId){const id=normalizePartnerId(partnerId);if(!id)return null;return store().get(`partner/${id}`,{type:'json',consistency:'strong'});}
 export async function listRatePlans(){const {blobs}=await store().list({prefix:'partner/'});const rows=[];for(const blob of blobs){const row=await store().get(blob.key,{type:'json'});if(row)rows.push(row);}return rows.sort((a,b)=>String(a.partnerId).localeCompare(String(b.partnerId)));}
+export async function ensureApiPartnerRatePlan(partnerId,companyName='',adminUser='system'){
+  const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');const existing=await getRatePlan(id);if(existing)return existing;const stamp=now();const plan={partnerId:id,planName:text(`API ${companyName||id}`),status:'INACTIVE',currency:'IDR',rules:[],createdAt:stamp,updatedAt:stamp,updatedBy:text(adminUser,80),note:'Placeholder onboarding API. Aktifkan setelah harga jual partner dikonfigurasi.'};await store().setJSON(`partner/${id}`,plan,{onlyIfNew:true});return plan;
+}
 export async function upsertRateRule(partnerId,input={},adminUser='admin'){
   const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');if(!await getPartner(id))throw new Error('Partner belum terdaftar.');const current=await getRatePlan(id);const rule=normalizeRule(input);const rules=[...(current?.rules||[])].filter(row=>row.ruleId!==rule.ruleId);rules.push(rule);rules.sort((a,b)=>a.matchType.localeCompare(b.matchType)||a.matchValue.localeCompare(b.matchValue));
   const stamp=now();const plan={partnerId:id,planName:text(input.planName||current?.planName||`Rate Plan ${id}`),status:upper(input.planStatus||current?.status||'ACTIVE')==='INACTIVE'?'INACTIVE':'ACTIVE',currency:'IDR',rules,createdAt:current?.createdAt||stamp,updatedAt:stamp,updatedBy:text(adminUser,80)};await store().setJSON(`partner/${id}`,plan);return plan;
@@ -55,6 +58,7 @@ export async function resolvePartnerRate(partnerId,route={}){
     if(rule)return {rate:rule,source:'PARTNER_RATE_PLAN',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status};
     return {rate:null,source:'PARTNER_RATE_PLAN_NO_MATCH',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status,cutoffWit:normalizeCutoff()};
   }
+  const partner=await getPartner(partnerId);if(partner?.onboardingApplicationId)return {rate:null,source:'API_PARTNER_RATE_PLAN_REQUIRED',planId:null,planName:null,planStatus:null,cutoffWit:normalizeCutoff()};
   const legacy=legacyRate(route);if(legacy)return {rate:legacy,source:'LEGACY_RATE_TABLE',planId:null,planName:'Legacy Rate Table',planStatus:'ACTIVE'};
   return {rate:null,source:'NO_RATE_PLAN',planId:null,planName:null,planStatus:null,cutoffWit:normalizeCutoff()};
 }
