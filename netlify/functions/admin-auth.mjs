@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { normalizeAdminRole } from './_admin-rbac-core.mjs';
 
 const COOKIE_NAME='libra_admin_session';
 const SESSION_SECONDS=30*60;
@@ -14,8 +15,8 @@ export default async request=>{
  if(request.method!=='POST')return Response.json({message:'Metode tidak diizinkan.'},{status:405});const sessionSecret=process.env.ADMIN_SESSION_SECRET;if(!sessionSecret||sessionSecret.length<32)return Response.json({message:'Pengamanan admin belum dikonfigurasi.'},{status:503});
  let body;try{body=await request.json();}catch{return Response.json({message:'Permintaan tidak valid.'},{status:400});}
  const users=parseUsers();let username='legacy-admin',role='SUPERADMIN',valid=false,otpVerified=false;
- if(users.length){const requested=String(body?.username||'').trim().toLowerCase();const user=users.find(row=>String(row.username||'').trim().toLowerCase()===requested&&row.active!==false);if(user&&verifyHashedPin(body?.pin,user)){if(user.totpSecret){otpVerified=verifyTotp(body?.otp,user.totpSecret);valid=otpVerified;}else valid=true;if(valid){username=String(user.username);role=String(user.role||'ADMIN').toUpperCase();}}}
- else{const configuredPin=process.env.ADMIN_PIN;if(configuredPin&&safeEqual(body?.pin??'',configuredPin)){const secret=process.env.ADMIN_TOTP_SECRET;if(secret){otpVerified=verifyTotp(body?.otp,secret);valid=otpVerified;}else valid=true;username=String(body?.username||'legacy-admin').trim().slice(0,80)||'legacy-admin';}}
+ if(users.length){const requested=String(body?.username||'').trim().toLowerCase();const user=users.find(row=>String(row.username||'').trim().toLowerCase()===requested&&row.active!==false);if(user&&verifyHashedPin(body?.pin,user)){if(user.totpSecret){otpVerified=verifyTotp(body?.otp,user.totpSecret);valid=otpVerified;}else valid=true;if(valid){username=String(user.username);role=normalizeAdminRole(user.role||'ADMIN');}}}
+ else{const configuredPin=process.env.ADMIN_PIN;if(configuredPin&&safeEqual(body?.pin??'',configuredPin)){const secret=process.env.ADMIN_TOTP_SECRET;if(secret){otpVerified=verifyTotp(body?.otp,secret);valid=otpVerified;}else valid=true;username=String(body?.username||'legacy-admin').trim().slice(0,80)||'legacy-admin';role='SUPERADMIN';}}
  if(!valid){await new Promise(resolve=>setTimeout(resolve,700));return Response.json({message:'Username, PIN, atau OTP salah. Akses ditolak.'},{status:401});}
  const expires=Math.floor(Date.now()/1000)+SESSION_SECONDS;const payload=Buffer.from(JSON.stringify({username,role,otp:otpVerified,expires,nonce:crypto.randomBytes(16).toString('hex')})).toString('base64url');const token=`${payload}.${sign(payload,sessionSecret)}`;
  return Response.json({ok:true,redirect:'/libra-admin',username,role},{status:200,headers:{'set-cookie':`${COOKIE_NAME}=${token}; Max-Age=${SESSION_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`,'cache-control':'no-store'}});
