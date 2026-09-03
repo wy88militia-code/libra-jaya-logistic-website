@@ -3,3 +3,109 @@
 .brand-logo{width:62px;height:62px;object-fit:contain;border-radius:14px;background:#fff;box-shadow:0 8px 24px #06284b14}
 .contact-list .contact-wide{grid-column:1/-1}
 @media(max-width:540px){.brand-logo{width:54px;height:54px}}
+
+
+/* Full-width landscape layout for phones, tablets, and desktop screens. */
+@media (orientation: landscape) and (min-width: 700px) {
+  html,
+  body {
+    width: 100%;
+    max-width: 100%;
+    overflow-x: hidden;
+  }
+
+  .site-header {
+    width: 100%;
+    padding-left: 3vw;
+    padding-right: 3vw;
+  }
+
+  .hero {
+    width: 100%;
+    max-width: none;
+    min-height: calc(100svh - 84px);
+    padding: clamp(42px, 7vh, 78px) 4vw;
+    grid-template-columns: minmax(0, 1.3fr) minmax(300px, .7fr);
+    gap: clamp(28px, 4vw, 64px);
+  }
+
+  .hero h1 {
+    font-size: clamp(38px, 5.2vw, 72px);
+  }
+
+  .hero-panel {
+    width: 100%;
+    max-width: none;
+  }
+
+  .section,
+  .contact {
+    width: 100%;
+    max-width: none;
+    padding-left: 4vw;
+    padding-right: 4vw;
+  }
+
+  .intro,
+  .contact {
+    grid-template-columns: minmax(0, 1fr) minmax(0, 1fr);
+    gap: clamp(36px, 6vw, 90px);
+  }
+
+  .section-head {
+    width: 100%;
+    max-width: none;
+  }
+
+  .service-grid,
+  .steps {
+    width: 100%;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+  }
+
+  .service-grid article,
+  .steps article {
+    min-width: 0;
+  }
+
+  .jl-card {
+    width: 100%;
+    max-width: none;
+    margin-left: 0;
+    margin-right: 0;
+    border-radius: 0;
+    padding-left: 4vw;
+    padding-right: 4vw;
+  }
+
+  footer {
+    width: 100%;
+    padding-left: 4vw;
+    padding-right: 4vw;
+  }
+}
+
+@media (orientation: landscape) and (min-width: 700px) and (max-height: 520px) {
+  .site-header {
+    height: 66px;
+  }
+
+  .brand-logo {
+    width: 48px;
+    height: 48px;
+  }
+
+  .hero {
+    min-height: calc(100svh - 66px);
+    padding-top: 28px;
+    padding-bottom: 28px;
+  }
+
+  .hero-panel {
+    padding: 24px;
+  }
+
+  .hero-actions {
+    margin-top: 22px;
+  }
+}
