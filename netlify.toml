@@ -11,12 +11,26 @@
   to = "/partner/api-onboarding.html"
   status = 200
 
+[[redirects]]
+  from = "/partner/activate"
+  to = "/partner/activate.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/partner/activate*"
+  [headers.values]
+    Cache-Control = "no-store, max-age=0"
+    Pragma = "no-cache"
+    Referrer-Policy = "no-referrer"
+    X-Robots-Tag = "noindex, nofollow"
     Permissions-Policy = "camera=(), microphone=(), geolocation=()"
 
 # Booking partner membutuhkan GPS tujuan untuk mengunci lokasi/kelurahan.
