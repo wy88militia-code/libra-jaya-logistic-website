@@ -21,9 +21,10 @@ Aksi kritis yang sudah diaudit:
 - pembuatan backup, retention prune, dan disaster recovery restore.
 
 ## Backup
-Scheduled function: `scheduled-daily-backup.mjs`.
+Scheduler: `scheduled-daily-backup.mjs`.
+Worker: `daily-backup-background.mjs`.
 
-Jadwal default: `15 17 * * *` UTC = sekitar 02:15 WIT setiap hari.
+Jadwal default: `15 17 * * *` UTC = sekitar 02:15 WIT setiap hari. Scheduled function hanya mengantrekan background worker sehingga snapshot besar tidak dibatasi execution window scheduled function. Request internal ditandatangani HMAC menggunakan `ADMIN_SESSION_SECRET`; tidak diperlukan secret backup tambahan.
 
 Backup mencakup store utama:
 - partners;
