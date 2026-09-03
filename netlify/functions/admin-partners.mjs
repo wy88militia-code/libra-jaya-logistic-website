@@ -1,44 +1,15 @@
-import { getPartner, getWallet, listPartners, makeApiCredentials, newPinHash, normalizePartnerId, normalizePhone, savePartner, validAdminSession } from './_partner-core.mjs';
+import { writeAdminAudit } from './_admin-audit-core.mjs';
+import { getAdminSession, getPartner, getWallet, listPartners, makeApiCredentials, newPinHash, normalizePartnerId, normalizePhone, savePartner } from './_partner-core.mjs';
 
-function escapeHtml(value) {
-  return String(value ?? '').replace(/[&<>'"]/g, (char) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', "'": '&#39;', '"': '&quot;' }[char]));
-}
+const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+function sameOrigin(request){const origin=request.headers.get('origin');if(!origin)return true;try{return new URL(origin).origin===new URL(request.url).origin;}catch{return false;}}
+async function loadRows(){const partners=await listPartners();return Promise.all(partners.map(async p=>({...p,balance:(await getWallet(p.partnerId)).balance})));}
+function render(rows,message='',credentials=null){const trs=rows.map(r=>`<tr><td><b>${esc(r.partnerId)}</b></td><td>${esc(r.companyName)}</td><td>${esc(r.picName)}</td><td>${esc(r.status)}</td><td>Rp${Number(r.balance||0).toLocaleString('id-ID')}</td></tr>`).join('');const box=credentials?`<div class="secret"><b>Simpan sekali sekarang.</b><br>Partner ID <code>${esc(credentials.partnerId)}</code><br>API Key <code>${esc(credentials.apiKey)}</code><br>API Secret <code>${esc(credentials.apiSecret)}</code><p>Secret tidak masuk Audit Trail.</p></div>`:'';return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Partner & Deposit</title><style>*{box-sizing:border-box}body{margin:0;background:#eef4f9;color:#10243d;font-family:Inter,system-ui}.wrap{max-width:1050px;margin:auto;padding:24px}.card{background:#fff;border:1px solid #dce6ef;border-radius:17px;padding:20px;margin-bottom:16px}.grid{display:grid;grid-template-columns:repeat(2,1fr);gap:10px}.grid input,.grid select,.grid button{padding:11px;border:1px solid #cbd8e6;border-radius:9px;font:inherit}.grid button{background:#0b2d52;color:#fff;border:0;font-weight:800}.msg{background:#e8f4ff;padding:11px;border-radius:9px}.secret{background:#fff8dc;border:1px solid #ead58b;padding:14px;border-radius:10px;margin:10px 0}code{word-break:break-all}table{width:100%;border-collapse:collapse}th,td{padding:9px;border-bottom:1px solid #edf1f5;text-align:left}@media(max-width:650px){.grid{grid-template-columns:1fr}table{font-size:12px}}</style></head><body><main class="wrap"><div class="card"><h1>Partner & Deposit</h1><p>Akun manual/non-onboarding. Partner API baru sebaiknya dibuat melalui Approval Onboarding agar lifecycle UAT otomatis.</p>${message?`<p class="msg">${esc(message)}</p>`:''}${box}<form method="post" class="grid"><input name="partnerId" placeholder="Partner ID" required><input name="companyName" placeholder="Nama perusahaan" required><input name="picName" placeholder="Nama PIC" required><input type="email" name="email" placeholder="Email PIC" required><input name="phone" placeholder="No HP +628..." required><input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="PIN 6 digit" required><select name="status"><option>ACTIVE</option><option>PENDING</option></select><button>Daftarkan Partner</button></form></div><div class="card"><h2>Daftar Partner</h2><table><thead><tr><th>ID</th><th>Perusahaan</th><th>PIC</th><th>Status</th><th>Saldo</th></tr></thead><tbody>${trs||'<tr><td colspan="5">Belum ada partner.</td></tr>'}</tbody></table></div><p><a href="/admin-audit-backup">Audit Trail & Backup →</a> • <a href="/libra-admin">← Home Admin</a></p></main></body></html>`;}
 
-function render(rows, message = '', credentials = null) {
-  const partnerRows = rows.map((row) => `<tr><td>${escapeHtml(row.partnerId)}</td><td>${escapeHtml(row.companyName)}</td><td>${escapeHtml(row.picName)}</td><td>${escapeHtml(row.status)}</td><td>Rp${Number(row.balance || 0).toLocaleString('id-ID')}</td></tr>`).join('');
-  const credentialBox = credentials ? `<div class="credential"><strong>Simpan sekali sekarang.</strong><br>Partner ID: <code>${escapeHtml(credentials.partnerId)}</code><br>API Key: <code>${escapeHtml(credentials.apiKey)}</code><br>API Secret: <code>${escapeHtml(credentials.apiSecret)}</code></div>` : '';
-  return `<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Admin Partner Libra</title><style>body{margin:0;font-family:system-ui;background:#eef4f9;color:#10243d}.wrap{max-width:1050px;margin:auto;padding:24px}.card{background:#fff;padding:22px;border-radius:18px;margin-bottom:18px;box-shadow:0 8px 30px #0b2d5212}h1{margin-top:0}.grid{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px}input,select,button{font:inherit;padding:12px;border-radius:10px;border:1px solid #cbd8e6}button{background:#ef312b;color:#fff;border:0;font-weight:800;cursor:pointer}.full{grid-column:1/-1}.msg{padding:10px;border-radius:8px;background:#eef7ff}.credential{padding:14px;background:#fff8dc;border:1px solid #eed98d;border-radius:10px;margin-top:12px}table{width:100%;border-collapse:collapse}th,td{padding:10px;border-bottom:1px solid #e7edf4;text-align:left}code{word-break:break-all}@media(max-width:700px){.grid{grid-template-columns:1fr}.full{grid-column:auto}table{font-size:12px}}</style></head><body><main class="wrap"><div class="card"><h1>Partner & Deposit</h1><p>Buat akun partner. PIN dipakai portal manual; API Key/Secret dipakai integrasi sistem.</p>${message ? `<p class="msg">${escapeHtml(message)}</p>` : ''}${credentialBox}<form method="post" class="grid"><input name="partnerId" placeholder="Partner ID, contoh AFA001" required><input name="companyName" placeholder="Nama perusahaan" required><input name="picName" placeholder="Nama PIC" required><input type="email" name="email" placeholder="Email PIC" required><input name="phone" placeholder="No HP +628..." required><input name="pin" inputmode="numeric" pattern="[0-9]{6}" maxlength="6" placeholder="PIN 6 digit" required><select name="status"><option value="ACTIVE">ACTIVE</option><option value="PENDING">PENDING</option></select><button type="submit">Daftarkan Partner</button></form></div><div class="card"><h2>Daftar Partner</h2><table><thead><tr><th>ID</th><th>Perusahaan</th><th>PIC</th><th>Status</th><th>Saldo</th></tr></thead><tbody>${partnerRows || '<tr><td colspan="5">Belum ada partner.</td></tr>'}</tbody></table></div><a href="/admin-tool">← Kembali ke Admin Tool</a></main></body></html>`;
-}
-
-async function loadRows() {
-  const partners = await listPartners();
-  return Promise.all(partners.map(async (partner) => ({ ...partner, balance: (await getWallet(partner.partnerId)).balance })));
-}
-
-export default async (request) => {
-  if (!validAdminSession(request)) return Response.redirect(new URL('/admin-login.html', request.url), 302);
-  if (request.method === 'GET') return new Response(render(await loadRows()), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
-  if (request.method !== 'POST') return new Response('Method not allowed', { status: 405 });
-  const form = await request.formData();
-  const partnerId = normalizePartnerId(form.get('partnerId'));
-  if (!partnerId) return new Response(render(await loadRows(), 'Partner ID tidak valid.'), { status: 400, headers: { 'content-type': 'text/html; charset=utf-8' } });
-  if (await getPartner(partnerId)) return new Response(render(await loadRows(), 'Partner ID sudah terdaftar. Gunakan ID lain atau lakukan reset melalui modul administrasi.'), { status: 409, headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
-  const credentials = makeApiCredentials();
-  const pin = newPinHash(form.get('pin'));
-  const partner = {
-    partnerId,
-    companyName: String(form.get('companyName') || '').trim().slice(0, 120),
-    picName: String(form.get('picName') || '').trim().slice(0, 100),
-    email: String(form.get('email') || '').trim().toLowerCase().slice(0, 120),
-    phone: normalizePhone(form.get('phone')),
-    status: String(form.get('status') || 'PENDING') === 'ACTIVE' ? 'ACTIVE' : 'PENDING',
-    ...pin,
-    ...credentials,
-    createdAt: new Date().toISOString(),
-    updatedAt: new Date().toISOString(),
-  };
-  await savePartner(partner);
-  return new Response(render(await loadRows(), 'Partner berhasil dibuat.', { partnerId, ...credentials }), { headers: { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-store' } });
+export default async request=>{
+ const session=getAdminSession(request);if(!session)return Response.redirect(new URL('/libra-admin-login.html',request.url),302);
+ if(request.method==='GET')return new Response(render(await loadRows()),{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY'}});
+ if(request.method!=='POST')return new Response('Method not allowed',{status:405});if(!sameOrigin(request))return new Response('Forbidden',{status:403});
+ try{const form=await request.formData();const partnerId=normalizePartnerId(form.get('partnerId'));if(!partnerId)throw new Error('Partner ID tidak valid.');if(await getPartner(partnerId))throw new Error('Partner ID sudah terdaftar.');const credentials=makeApiCredentials();const pin=newPinHash(form.get('pin'));const stamp=new Date().toISOString();const partner={partnerId,companyName:String(form.get('companyName')||'').trim().slice(0,120),picName:String(form.get('picName')||'').trim().slice(0,100),email:String(form.get('email')||'').trim().toLowerCase().slice(0,120),phone:normalizePhone(form.get('phone')),status:String(form.get('status')||'PENDING')==='ACTIVE'?'ACTIVE':'PENDING',...pin,...credentials,createdAt:stamp,updatedAt:stamp};await savePartner(partner);await writeAdminAudit({session,request,action:'PARTNER_CREATE',entityType:'PARTNER',entityId:partnerId,after:partner,note:`Partner ${partner.companyName} dibuat. PIN/API secret direduksi dari audit.`});return new Response(render(await loadRows(),'Partner berhasil dibuat.',{partnerId,...credentials}),{headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store','x-frame-options':'DENY'}});}catch(e){return new Response(render(await loadRows(),e?.message||'Pembuatan partner gagal.'),{status:400,headers:{'content-type':'text/html; charset=utf-8','cache-control':'no-store'}});}
 };
-
-export const config = { path: '/admin-partners' };
+export const config={path:'/admin-partners'};
