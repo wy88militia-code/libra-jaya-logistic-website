@@ -21,6 +21,7 @@ function num(v){
   else if(x.includes(','))x=x.replace(',','.');
   const n=Number(x);return Number.isFinite(n)?n:null;
 }
+function routeMatches(rule,route){const r=upper(rule),x=upper(route);if(!r||!x)return false;if(r==='*')return true;const i=r.indexOf('*');if(i<0)return r===x;return x.startsWith(r.slice(0,i))&&x.endsWith(r.slice(i+1));}
 function config(){return {sheetId:process.env.MASTER_SHEET_ID||DEFAULT_SHEET_ID,email:clean(process.env.GOOGLE_SERVICE_ACCOUNT_EMAIL),privateKey:normalizeKey(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY)};}
 export function isVendorMasterConfigured(){const c=config();return Boolean(c.sheetId&&c.email&&c.privateKey);}
 
@@ -71,12 +72,12 @@ function dateActive(r,at){const d=String(at||new Date().toISOString()).slice(0,1
 export async function estimateVendorCostForBooking(booking={},snapshot=null){
   const snap=snapshot||await getVendorMaster();if(!snap)return {snapshotVersion:null,total:0,components:[],status:'NO_MASTER'};
   const route=upper(booking.kodeRute||booking.routeCode),service=upper(booking.serviceCode||booking.service||booking.serviceType||booking.skemaLayanan),cargo=upper(booking.cargoType||booking.goodsType),weight=Math.max(0,Number(booking.chargeableWeightKg||booking.chargeableKg||booking.actualWeightKg||booking.weightKg||0)),at=booking.createdAt||new Date().toISOString(),vendors=new Map((snap.vendors||[]).map(v=>[v.vendorId,v]));
-  const candidates=(snap.rates||[]).filter(r=>r.status==='ACTIVE'&&r.routeCode===route&&dateActive(r,at)&&(!r.service||(service&&r.service===service))&&(!r.cargoType||(cargo&&r.cargoType===cargo))).sort((a,b)=>b.priority-a.priority);
+  const candidates=(snap.rates||[]).filter(r=>r.status==='ACTIVE'&&routeMatches(r.routeCode,route)&&dateActive(r,at)&&(!r.service||(service&&r.service===service))&&(!r.cargoType||(cargo&&r.cargoType===cargo))).sort((a,b)=>b.priority-a.priority);
   const byCategory=new Map();for(const r of candidates)if(!byCategory.has(r.category))byCategory.set(r.category,r);
   const components=[];
   for(const r of byCategory.values()){
     const billable=Math.max(weight,Number(r.minChargeKg||0)),base=r.rateType==='FLAT'?Number(r.flatAmount||0):Math.round(billable*Number(r.ratePerKg||0));let surcharge=0;
-    for(const s of snap.surcharges||[]){if(s.status!=='ACTIVE'||s.vendorId!==r.vendorId||s.routeCode!==route||!dateActive(s,at))continue;if(s.category&&s.category!==r.category)continue;surcharge+=s.perKg?Math.round(weight*Number(s.amount||0)):Number(s.amount||0);}
+    for(const s of snap.surcharges||[]){if(s.status!=='ACTIVE'||s.vendorId!==r.vendorId||!routeMatches(s.routeCode,route)||!dateActive(s,at))continue;if(s.category&&s.category!==r.category)continue;surcharge+=s.perKg?Math.round(weight*Number(s.amount||0)):Number(s.amount||0);}
     components.push({rateId:r.rateId,vendorId:r.vendorId,vendorName:vendors.get(r.vendorId)?.vendorName||r.vendorId,category:r.category,baseCost:base,surchargeCost:surcharge,totalCost:base+surcharge});
   }
   return {snapshotVersion:snap.version,total:components.reduce((n,x)=>n+x.totalCost,0),components,status:components.length?'ESTIMATED':'NO_MATCHING_RATE'};
