@@ -1,0 +1,50 @@
+const ROLE_ALIASES={ADMIN:'SUPERADMIN',OWNER:'SUPERADMIN',CS:'CUSTOMER_SERVICE',CUSTOMER_SERVICE:'CUSTOMER_SERVICE',CUSTOMERSERVICE:'CUSTOMER_SERVICE',FINANCE:'FINANCE',OPS:'OPS',OPERATION:'OPS',OPERATIONS:'OPS',COURIER:'COURIER',SUPERADMIN:'SUPERADMIN'};
+export const ADMIN_ROLES=['SUPERADMIN','FINANCE','OPS','CUSTOMER_SERVICE','COURIER'];
+export function normalizeAdminRole(value){return ROLE_ALIASES[String(value||'').trim().toUpperCase()]||'CUSTOMER_SERVICE';}
+
+const PATH_ROLES=[
+ [/^\/(?:libra-admin|admin-tool)$/,ADMIN_ROLES],
+ [/^\/admin-partners$/,['SUPERADMIN','FINANCE']],
+ [/^\/admin-rate-plans$/,['SUPERADMIN','FINANCE']],
+ [/^\/admin-reconciliation$/,['SUPERADMIN','FINANCE']],
+ [/^\/admin-quotes$/,['SUPERADMIN','FINANCE','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-master-sheet$/,['SUPERADMIN','OPS']],
+ [/^\/admin-bookings$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-courier$/,['SUPERADMIN','OPS','COURIER']],
+ [/^\/admin-claims$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-sla-control$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-api-onboarding$/,['SUPERADMIN','OPS']],
+ [/^\/admin-api-uat$/,['SUPERADMIN','OPS']],
+ [/^\/admin-api-partners$/,['SUPERADMIN','OPS']],
+ [/^\/admin-api-security$/,['SUPERADMIN','OPS']],
+ [/^\/admin-webhook-control$/,['SUPERADMIN','OPS']],
+ [/^\/admin-partner-links$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-audit-backup$/,['SUPERADMIN']],
+ [/^\/admin-resilience$/,['SUPERADMIN']],
+ [/^\/admin-approvals$/,['SUPERADMIN','FINANCE','OPS']],
+];
+
+export function canonicalAdminPath(pathname){let path=String(pathname||'/').split('?')[0];if(path.startsWith('/.netlify/functions/'))path=`/${path.slice('/.netlify/functions/'.length)}`;return path.replace(/\/$/,'')||'/';}
+export function allowedRolesForPath(pathname){const path=canonicalAdminPath(pathname);for(const [pattern,roles] of PATH_ROLES)if(pattern.test(path))return [...roles];if(path.startsWith('/admin-'))return ['SUPERADMIN'];return ADMIN_ROLES;}
+export function canRoleAccessPath(role,pathname){return allowedRolesForPath(pathname).includes(normalizeAdminRole(role));}
+
+const PERMISSIONS={
+ 'partner.manage':['SUPERADMIN','FINANCE'],
+ 'wallet.adjust.request':['SUPERADMIN','FINANCE'],
+ 'rate.manage':['SUPERADMIN','FINANCE'],
+ 'finance.reconcile':['SUPERADMIN','FINANCE'],
+ 'quote.manage':['SUPERADMIN','FINANCE','OPS','CUSTOMER_SERVICE'],
+ 'booking.manage':['SUPERADMIN','OPS','CUSTOMER_SERVICE'],
+ 'master.manage':['SUPERADMIN','OPS'],
+ 'tracking.manage':['SUPERADMIN','OPS','COURIER'],
+ 'claim.manage':['SUPERADMIN','OPS','CUSTOMER_SERVICE'],
+ 'sla.manage':['SUPERADMIN','OPS','CUSTOMER_SERVICE'],
+ 'api.manage':['SUPERADMIN','OPS'],
+ 'api.security':['SUPERADMIN','OPS'],
+ 'backup.manage':['SUPERADMIN'],
+ 'approval.review':['SUPERADMIN','FINANCE','OPS'],
+};
+export function hasAdminPermission(role,permission){return (PERMISSIONS[permission]||['SUPERADMIN']).includes(normalizeAdminRole(role));}
+export function assertAdminPermission(session,permission){if(!session||!hasAdminPermission(session.role,permission)){const e=new Error(`Role ${normalizeAdminRole(session?.role)} tidak memiliki izin ${permission}.`);e.code='ADMIN_FORBIDDEN';e.httpStatus=403;throw e;}return true;}
+
+export function roleMatrix(){return ADMIN_ROLES.map(role=>({role,areas:PATH_ROLES.filter(([,roles])=>roles.includes(role)).map(([pattern])=>String(pattern).replace(/^\//,'').replace(/\/$/,'')).length}));}
