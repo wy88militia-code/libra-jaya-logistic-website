@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { activateProduction } from './_api-uat-core.mjs';
 import { restoreBackup } from './_backup-core.mjs';
+import { applyFinanceAdjustment } from './_billing-core.mjs';
 import { createOperationalNotification } from './_notification-core.mjs';
 import { getApiPolicy, saveApiPolicy } from './_api-policy-core.mjs';
 import { getPartner, getWallet, mutateWallet, normalizePartnerId } from './_partner-core.mjs';
@@ -15,6 +16,8 @@ const clean=(v,n=500)=>String(v??'').trim().slice(0,n);
 const requestId=()=>`APR-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 const RULES={
  WALLET_ADJUST:{maker:['SUPERADMIN','FINANCE'],checker:['SUPERADMIN','FINANCE'],label:'Koreksi Saldo Partner'},
+ FINANCE_ADJUSTMENT:{maker:['SUPERADMIN','FINANCE'],checker:['SUPERADMIN','FINANCE'],label:'Debit/Credit Note Partner'},
+ CLAIM_SETTLEMENT:{maker:['SUPERADMIN','FINANCE'],checker:['SUPERADMIN','FINANCE'],label:'Penyelesaian Klaim Finansial'},
  RATE_RULE_UPSERT:{maker:['SUPERADMIN','FINANCE'],checker:['SUPERADMIN','FINANCE'],label:'Perubahan Rate Rule Aktif'},
  RATE_RULE_DELETE:{maker:['SUPERADMIN','FINANCE'],checker:['SUPERADMIN','FINANCE'],label:'Hapus Rate Rule'},
  RATE_PLAN_STATUS:{maker:['SUPERADMIN','FINANCE'],checker:['SUPERADMIN','FINANCE'],label:'Perubahan Status Rate Plan'},
@@ -36,9 +39,11 @@ export async function listApprovalRequests(limit=250){const {blobs}=await store(
 export async function getApprovalRequest(id){const rows=await listApprovalRequests(500);return rows.find(r=>r.requestId===String(id||''))||null;}
 export async function countPendingApprovals(){return (await listApprovalRequests(500)).filter(r=>r.status==='PENDING'&&new Date(r.expiresAt).getTime()>Date.now()).length;}
 
-async function beforeSnapshot(record){const p=record.payload||{};switch(record.actionType){case 'WALLET_ADJUST':return getWallet(p.partnerId);case 'RATE_RULE_UPSERT':case 'RATE_RULE_DELETE':case 'RATE_PLAN_STATUS':return getRatePlan(p.partnerId);case 'API_REACTIVATE':return getApiPolicy(p.partnerId);case 'API_PRODUCTION_ACTIVATE':return null;case 'DR_RESTORE':return {backupId:p.backupId};default:return null;}}
+async function beforeSnapshot(record){const p=record.payload||{};switch(record.actionType){case 'WALLET_ADJUST':case 'FINANCE_ADJUSTMENT':case 'CLAIM_SETTLEMENT':return getWallet(p.partnerId);case 'RATE_RULE_UPSERT':case 'RATE_RULE_DELETE':case 'RATE_PLAN_STATUS':return getRatePlan(p.partnerId);case 'API_REACTIVATE':return getApiPolicy(p.partnerId);case 'API_PRODUCTION_ACTIVATE':return null;case 'DR_RESTORE':return {backupId:p.backupId};default:return null;}}
 async function execute(record,checker){const p=record.payload||{},actor=`${checker.username} (checker)`;switch(record.actionType){
  case 'WALLET_ADJUST':{const partnerId=normalizePartnerId(p.partnerId);if(!await getPartner(partnerId))throw new Error('Partner tidak ditemukan.');const delta=Math.trunc(Number(p.delta));if(!Number.isFinite(delta)||delta===0||Math.abs(delta)>10000000000)throw new Error('Nilai koreksi saldo tidak valid.');const result=await mutateWallet(partnerId,delta,`APPROVAL:${record.requestId}`,{source:'ADMIN_ADJUSTMENT',description:clean(p.description||record.reason,300),metadata:{approvalRequestId:record.requestId,maker:record.makerUser,checker:checker.username}});return {partnerId,balance:result.balance,transactionId:result.transactionId,delta};}
+ case 'FINANCE_ADJUSTMENT':return applyFinanceAdjustment({partnerId:p.partnerId,signedAmount:p.signedAmount,kind:p.kind||(Number(p.signedAmount)>=0?'DEBIT_NOTE':'CREDIT_NOTE'),description:p.description||record.reason,externalReference:p.externalReference,bookingId:p.bookingId,claimReference:p.claimReference},{requestId:record.requestId,maker:record.makerUser,checker:checker.username});
+ case 'CLAIM_SETTLEMENT':return applyFinanceAdjustment({partnerId:p.partnerId,signedAmount:-Math.abs(Number(p.amount)||0),kind:'CLAIM_SETTLEMENT',description:p.description||`Settlement klaim ${p.claimReference||''}`.trim(),externalReference:p.externalReference,bookingId:p.bookingId,claimReference:p.claimReference},{requestId:record.requestId,maker:record.makerUser,checker:checker.username});
  case 'RATE_RULE_UPSERT':return upsertRateRule(p.partnerId,{planName:p.planName,planStatus:p.planStatus,matchType:p.matchType,matchValue:p.matchValue,ratePerKg:p.ratePerKg,minimumChargeKg:p.minimumChargeKg,fixedFee:p.fixedFee,handlingFee:p.handlingFee,surchargePct:p.surchargePct,cutoffWit:p.cutoffWit,active:true},actor);
  case 'RATE_RULE_DELETE':return deleteRateRule(p.partnerId,p.ruleId,actor);
  case 'RATE_PLAN_STATUS':return setRatePlanStatus(p.partnerId,p.status,actor);
