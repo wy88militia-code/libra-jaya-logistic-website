@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { findRoute } from './_master-sheet-core.mjs';
+import { calculateRateAmount, resolvePartnerRate } from './_rate-plan-core.mjs';
 
 const STORE_NAME='libra-quotes';
 const APPROVED_TTL_MS=30*60*1000;
@@ -10,18 +11,15 @@ function key(id){return `quote/${String(id||'').trim()}`;}
 function now(){return new Date().toISOString();}
 function number(value){const n=Number(value);return Number.isFinite(n)?n:null;}
 
-function rateTable(){try{const parsed=JSON.parse(process.env.LIBRA_RATE_TABLE_JSON||'{}');return parsed&&typeof parsed==='object'?parsed:{};}catch{return {};}}
-function routeRate(route){const table=rateTable();return table[route.kodeRute]||table[route.zonaTarif]||table.DEFAULT||null;}
-function automaticAmount(route,weightKg){const rate=routeRate(route);if(!rate)return null;const ratePerKg=number(rate.ratePerKg);if(!ratePerKg||ratePerKg<=0)return null;const minCharge=Math.max(0,number(rate.minimumChargeKg)||0);const chargeable=Math.max(weightKg,minCharge);const fixed=Math.max(0,number(rate.fixedFee)||0);return Math.round(chargeable*ratePerKg+fixed);}
-
 export async function createPartnerQuote(partnerId,input={}){
   const routeResult=await findRoute({kodeRute:input.kodeRute,kodeWilayah:input.kodeWilayah,kelurahan:input.kelurahan,distrik:input.distrik});
   if(!routeResult){const error=new Error('Rute tidak ditemukan pada Master yang sudah dipublish.');error.code='ROUTE_NOT_FOUND';throw error;}
   const route=routeResult.route;const weightKg=number(input.weightKg);
   if(!weightKg||weightKg<=0||weightKg>100000){const error=new Error('Berat kiriman tidak valid.');error.code='INVALID_WEIGHT';throw error;}
   if(['OUT_OF_COVERAGE','NOT_ACTIVE','PENDING_VERIFICATION'].includes(route.coverageStatus)){const error=new Error(route.coverageReason||'Rute belum dapat dibooking.');error.code=route.coverageStatus;error.route=route;throw error;}
-  const quoteId=`LBRQ-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;const autoAmount=route.coverageStatus==='ACTIVE'?automaticAmount(route,weightKg):null;const approved=Number.isFinite(autoAmount)&&autoAmount>0;const createdAt=now();
-  const quote={quoteId,partnerId:String(partnerId),status:approved?'APPROVED':'PENDING_APPROVAL',amount:approved?autoAmount:null,currency:'IDR',weightKg,kodeRute:route.kodeRute,kodeWilayah:route.kodeWilayah,kelurahan:route.kelurahan,distrik:route.distrik,kabupatenKota:route.kabupatenKota,coverageStatus:route.coverageStatus,coverageReason:route.coverageReason,skemaLayanan:route.skemaLayanan||route.jenisLayanan,minimumLoadKg:route.minimumLoadKg||null,sla:route.slaTotalHub||route.slaLastmile||route.slaMaster||null,masterVersion:routeResult.version,createdAt,updatedAt:createdAt,expiresAt:new Date(Date.now()+(approved?APPROVED_TTL_MS:PENDING_TTL_MS)).toISOString(),approvalSource:approved?'RATE_TABLE':'ADMIN_REQUIRED'};
+  const rateResolution=await resolvePartnerRate(partnerId,route);const pricing=route.coverageStatus==='ACTIVE'&&rateResolution.rate?calculateRateAmount(rateResolution.rate,weightKg):null;
+  const quoteId=`LBRQ-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;const approved=Boolean(pricing?.totalAmount>0);const createdAt=now();
+  const quote={quoteId,partnerId:String(partnerId),status:approved?'APPROVED':'PENDING_APPROVAL',amount:approved?pricing.totalAmount:null,currency:'IDR',weightKg,chargeableKg:pricing?.chargeableKg||null,kodeRute:route.kodeRute,kodeWilayah:route.kodeWilayah,kelurahan:route.kelurahan,distrik:route.distrik,kabupatenKota:route.kabupatenKota,coverageStatus:route.coverageStatus,coverageReason:route.coverageReason,skemaLayanan:route.skemaLayanan||route.jenisLayanan,minimumLoadKg:route.minimumLoadKg||null,sla:route.slaTotalHub||route.slaLastmile||route.slaMaster||null,cutoffWit:pricing?.cutoffWit||rateResolution.rate?.cutoffWit||rateResolution.cutoffWit||null,ratePlanId:rateResolution.planId||null,ratePlanName:rateResolution.planName||null,rateSource:rateResolution.source,pricingBreakdown:pricing?{ratePerKg:pricing.ratePerKg,minimumChargeKg:pricing.minimumChargeKg,actualWeightKg:pricing.actualWeightKg,chargeableKg:pricing.chargeableKg,baseAmount:pricing.baseAmount,surchargePct:pricing.surchargePct,surchargeAmount:pricing.surchargeAmount,fixedFee:pricing.fixedFee,handlingFee:pricing.handlingFee,totalAmount:pricing.totalAmount}:null,masterVersion:routeResult.version,createdAt,updatedAt:createdAt,expiresAt:new Date(Date.now()+(approved?APPROVED_TTL_MS:PENDING_TTL_MS)).toISOString(),approvalSource:approved?(rateResolution.source==='PARTNER_RATE_PLAN'?'RATE_PLAN':'LEGACY_RATE_TABLE'):'ADMIN_REQUIRED'};
   await store().setJSON(key(quoteId),quote,{onlyIfNew:true});return quote;
 }
 export async function getQuote(quoteId){return store().get(key(quoteId),{type:'json',consistency:'strong'});}
