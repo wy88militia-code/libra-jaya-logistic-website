@@ -157,3 +157,86 @@
     margin: 32px 0 0;
   }
 }
+
+
+/* Branded social media shortcuts in the main header. */
+.site-header nav {
+  margin-left: auto;
+}
+
+.header-social {
+  display: flex;
+  align-items: center;
+  gap: 9px;
+  margin-left: 20px;
+}
+
+.social-icon {
+  width: 37px;
+  height: 37px;
+  display: grid;
+  place-items: center;
+  border-radius: 11px;
+  transition: transform .2s ease, box-shadow .2s ease;
+}
+
+.social-icon:hover {
+  transform: translateY(-2px);
+  box-shadow: 0 7px 16px #0b2d5228;
+}
+
+.social-icon svg {
+  width: 21px;
+  height: 21px;
+}
+
+.social-icon.facebook {
+  color: #fff;
+  background: #1877f2;
+}
+
+.social-icon.facebook svg {
+  fill: currentColor;
+}
+
+.social-icon.instagram {
+  background: linear-gradient(135deg,#833ab4 0%,#c13584 34%,#e1306c 55%,#fd1d1d 72%,#fcb045 100%);
+}
+
+.social-icon.instagram svg {
+  fill: none;
+  stroke: #fff;
+  stroke-width: 1.9;
+}
+
+.social-icon.instagram .instagram-dot {
+  fill: #fff;
+  stroke: none;
+}
+
+@media (max-width: 820px) {
+  .header-social {
+    margin-left: auto;
+  }
+
+  .menu-toggle {
+    margin-left: 8px;
+  }
+}
+
+@media (max-width: 540px) {
+  .header-social {
+    gap: 6px;
+  }
+
+  .social-icon {
+    width: 33px;
+    height: 33px;
+    border-radius: 9px;
+  }
+
+  .social-icon svg {
+    width: 19px;
+    height: 19px;
+  }
+}
