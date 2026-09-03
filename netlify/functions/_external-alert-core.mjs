@@ -1,9 +1,10 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
-import { getPartner } from './_partner-core.mjs';
 
 const STORE='libra-external-alerts';
+const PARTNER_STORE='libra-partners';
 const store=()=>getStore(STORE);
+const partnerStore=()=>getStore(PARTNER_STORE);
 const now=()=>new Date().toISOString();
 const clean=(value,max=1000)=>String(value??'').trim().slice(0,max);
 const normalizePartnerId=value=>String(value??'').trim().toUpperCase().replace(/[^A-Z0-9_-]/g,'').slice(0,40);
@@ -12,6 +13,7 @@ const phoneList=value=>[...new Set(String(value||'').split(/[;,\s]+/).map(v=>v.r
 const alertId=()=>`XAL-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`;
 const bookingThreshold=()=>Math.max(0,Math.trunc(Number(process.env.EXTERNAL_ALERT_BOOKING_AMOUNT_THRESHOLD)||10000000));
 const retryMs=[60_000,5*60_000,30*60_000,2*60*60_000,12*60*60_000];
+async function readPartner(partnerId){const id=normalizePartnerId(partnerId);return id?partnerStore().get(`partner/${id}`,{type:'json',consistency:'strong'}):null;}
 
 function config(){
   const email={apiKey:String(process.env.RESEND_API_KEY||'').trim(),from:clean(process.env.ALERT_EMAIL_FROM,200),adminTo:emailList(process.env.ALERT_ADMIN_EMAILS)};email.configured=Boolean(email.apiKey&&email.from);
@@ -34,7 +36,7 @@ function deliveryPolicy(notification,force=false){
 
 async function recipientInfo(notification){
   const c=config();const audience=String(notification.audience||'');if(audience==='admin')return {emails:c.email.adminTo,phones:c.whatsapp.adminTo};
-  if(audience.startsWith('partner/')){const partnerId=normalizePartnerId(notification.partnerId||audience.slice(8));const partner=partnerId?await getPartner(partnerId):null;return {emails:partner?.email&&String(partner.email).includes('@')?[String(partner.email).trim().toLowerCase()]:[],phones:partner?.phone?[String(partner.phone).replace(/\D/g,'')].filter(v=>v.length>=8):[]};}
+  if(audience.startsWith('partner/')){const partnerId=normalizePartnerId(notification.partnerId||audience.slice(8));const partner=await readPartner(partnerId);return {emails:partner?.email&&String(partner.email).includes('@')?[String(partner.email).trim().toLowerCase()]:[],phones:partner?.phone?[String(partner.phone).replace(/\D/g,'')].filter(v=>v.length>=8):[]};}
   return {emails:[],phones:[]};
 }
 function initialChannel(wanted){return wanted?{status:'PENDING',attempts:0,lastError:null,lastAttemptAt:null,deliveredAt:null,providerId:null}:{status:'NOT_REQUESTED',attempts:0,lastError:null,lastAttemptAt:null,deliveredAt:null,providerId:null};}
