@@ -1,4 +1,5 @@
 import crypto from 'node:crypto';
+import { getUatRecord } from './_api-uat-core.mjs';
 import { requirePartnerSession, saveTopup } from './_partner-core.mjs';
 
 function basicAuth(secret) {
@@ -14,6 +15,13 @@ export default async (request) => {
   const partner = await requirePartnerSession(request);
   if (!partner) return Response.json({ message: 'Sesi partner tidak valid.' }, { status: 401 });
   if (request.method !== 'POST') return Response.json({ message: 'Metode tidak diizinkan.' }, { status: 405 });
+
+  if (partner.onboardingApplicationId) {
+    const uat = await getUatRecord(partner.partnerId);
+    if (!uat || String(uat.finalDecision || '').toUpperCase() !== 'PASS') {
+      return Response.json({ message: 'Deposit partner API baru dibuka setelah UAT mendapat Final PASS dari Admin Libra.', code: 'API_DEPOSIT_LOCKED_UNTIL_UAT_PASS' }, { status: 409 });
+    }
+  }
 
   const xenditKey = process.env.XENDIT_SECRET_KEY;
   if (!xenditKey) return Response.json({ message: 'Xendit belum dikonfigurasi oleh admin.' }, { status: 503 });

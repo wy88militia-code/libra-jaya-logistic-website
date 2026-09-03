@@ -16,6 +16,11 @@
   to = "/partner/activate.html"
   status = 200
 
+[[redirects]]
+  from = "/partner/api-dashboard"
+  to = "/partner/api-dashboard.html"
+  status = 200
+
 [[headers]]
   for = "/*"
   [headers.values]
@@ -26,6 +31,15 @@
 
 [[headers]]
   for = "/partner/activate*"
+  [headers.values]
+    Cache-Control = "no-store, max-age=0"
+    Pragma = "no-cache"
+    Referrer-Policy = "no-referrer"
+    X-Robots-Tag = "noindex, nofollow"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=()"
+
+[[headers]]
+  for = "/partner/api-dashboard*"
   [headers.values]
     Cache-Control = "no-store, max-age=0"
     Pragma = "no-cache"
