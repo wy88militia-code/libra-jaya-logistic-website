@@ -4,7 +4,7 @@ export function normalizeAdminRole(value){return ROLE_ALIASES[String(value||'').
 
 const PATH_ROLES=[
  [/^\/(?:libra-admin|admin-tool)$/,ADMIN_ROLES],
- [/^\/courier$/,['SUPERADMIN','OPS','COURIER']],
+ [/^\/courier(?:\/assignments|\/simulation)?$/,['SUPERADMIN','OPS','COURIER']],
  [/^\/admin-partners$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-rate-plans$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-reconciliation$/,['SUPERADMIN','FINANCE']],
@@ -13,7 +13,8 @@ const PATH_ROLES=[
  [/^\/admin-quotes$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-master-sheet$/,['SUPERADMIN','OPS']],
  [/^\/admin-bookings$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
- [/^\/admin-courier$/,['SUPERADMIN','OPS','COURIER']],
+ [/^\/admin-courier$/,['SUPERADMIN','OPS']],
+ [/^\/admin-courier-assignment$/,['SUPERADMIN','OPS']],
  [/^\/admin-claims$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
  [/^\/admin-sla-control$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
  [/^\/admin-api-onboarding$/,['SUPERADMIN','OPS']],
@@ -41,6 +42,7 @@ const PERMISSIONS={
  'booking.manage':['SUPERADMIN','OPS','CUSTOMER_SERVICE'],
  'master.manage':['SUPERADMIN','OPS'],
  'tracking.manage':['SUPERADMIN','OPS','COURIER'],
+ 'courier.assignment':['SUPERADMIN','OPS'],
  'claim.manage':['SUPERADMIN','OPS','CUSTOMER_SERVICE'],
  'sla.manage':['SUPERADMIN','OPS','CUSTOMER_SERVICE'],
  'api.manage':['SUPERADMIN','OPS'],
