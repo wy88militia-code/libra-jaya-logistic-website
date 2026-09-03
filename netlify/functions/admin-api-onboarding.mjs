@@ -1,5 +1,6 @@
 import { approveApplicationAndCreateUat } from './_api-onboarding-approval.mjs';
 import { listOnboardingApplications } from './_api-uat-core.mjs';
+import { createOperationalNotification } from './_notification-core.mjs';
 import { createPartnerActivation, getCurrentActivationStatus } from './_partner-activation.mjs';
 import { getAdminSession } from './_partner-core.mjs';
 
@@ -16,9 +17,13 @@ export default async request=>{
     const form=await request.formData();const action=String(form.get('action')||'');
     try{
       if(action==='approve_create_uat'){
-        const result=await approveApplicationAndCreateUat(form.get('applicationId'),session.username);activationReveal={partnerId:result.partnerId,companyName:result.companyName,expiresAt:result.activationExpiresAt,url:activationUrl(request,{activationId:result.activationId,token:result.activationToken})};message=`${result.companyName} disetujui. Partner ID ${result.partnerId} dibuat dan link aktivasi UAT siap dikirim ke partner.`;
+        const result=await approveApplicationAndCreateUat(form.get('applicationId'),session.username);activationReveal={partnerId:result.partnerId,companyName:result.companyName,expiresAt:result.activationExpiresAt,url:activationUrl(request,{activationId:result.activationId,token:result.activationToken})};
+        try{await createOperationalNotification({partnerId:result.partnerId,type:'ONBOARDING_APPROVED',severity:'SUCCESS',title:'Pengajuan API Libra disetujui',message:`Pengajuan integrasi API ${result.companyName} telah disetujui dan Partner ID ${result.partnerId} sudah dibuat. Link aktivasi sekali pakai diberikan terpisah melalui kanal yang diverifikasi; jangan meminta API Secret melalui chat.`,reference:result.applicationId,partnerLink:'/partner/login.html',adminLink:'/admin-api-onboarding',dedupeKey:`onboarding-approved:${result.applicationId}`,metadata:{applicationId:result.applicationId,partnerId:result.partnerId,environment:'UAT'}});}catch{}
+        message=`${result.companyName} disetujui. Partner ID ${result.partnerId} dibuat dan link aktivasi UAT siap dikirim ke partner.`;
       }else if(action==='reissue_activation'){
-        const partnerId=String(form.get('partnerId')||'');const applicationId=String(form.get('applicationId')||'');const activation=await createPartnerActivation(partnerId,applicationId,{ttlHours:72});activationReveal={partnerId,companyName:String(form.get('companyName')||''),expiresAt:activation.expiresAt,url:activationUrl(request,activation)};message=`Link aktivasi baru untuk ${partnerId} dibuat. Link sebelumnya otomatis dicabut.`;
+        const partnerId=String(form.get('partnerId')||'');const applicationId=String(form.get('applicationId')||'');const activation=await createPartnerActivation(partnerId,applicationId,{ttlHours:72});activationReveal={partnerId,companyName:String(form.get('companyName')||''),expiresAt:activation.expiresAt,url:activationUrl(request,activation)};
+        try{await createOperationalNotification({partnerId,type:'ACTIVATION_REISSUED',severity:'WARNING',title:'Link aktivasi API diperbarui',message:`Admin Libra menerbitkan ulang link aktivasi untuk ${partnerId}. Link sebelumnya sudah dicabut. Link/token baru tidak dikirim melalui notifikasi ini dan diberikan terpisah melalui kanal yang diverifikasi.`,reference:applicationId,partnerLink:'/partner/login.html',adminLink:'/admin-api-onboarding',dedupeKey:`activation-reissued:${activation.activationId}`,metadata:{applicationId,partnerId,expiresAt:activation.expiresAt}});}catch{}
+        message=`Link aktivasi baru untuk ${partnerId} dibuat. Link sebelumnya otomatis dicabut.`;
       }else throw new Error('Aksi tidak dikenal.');
     }catch(e){error=e?.message||'Approval gagal.';}
   }else if(request.method!=='GET')return new Response('Method not allowed',{status:405});
