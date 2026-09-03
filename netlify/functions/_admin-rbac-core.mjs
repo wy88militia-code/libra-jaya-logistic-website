@@ -13,7 +13,7 @@ const PATH_ROLES=[
  [/^\/admin-quotes$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-master-sheet$/,['SUPERADMIN','OPS']],
  [/^\/admin-bookings$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
- [/^\/admin-courier$/,['SUPERADMIN','OPS','COURIER']],
+ [/^\/admin-courier$/,['SUPERADMIN','OPS']],
  [/^\/admin-courier-assignment$/,['SUPERADMIN','OPS']],
  [/^\/admin-claims$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
  [/^\/admin-sla-control$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
