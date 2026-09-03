@@ -1,0 +1,4 @@
+import crypto from 'node:crypto';
+function token(){const secret=String(process.env.ADMIN_SESSION_SECRET||'');if(secret.length<32)throw new Error('ADMIN_SESSION_SECRET belum dikonfigurasi.');return crypto.createHmac('sha256',secret).update('libra:sla-monitor:v1').digest('base64url');}
+export default async ()=>{const origin=String(process.env.URL||process.env.DEPLOY_PRIME_URL||'').replace(/\/$/,'');if(!origin)throw new Error('Netlify URL environment belum tersedia.');const response=await fetch(`${origin}/internal/sla-monitor-background`,{method:'POST',headers:{'x-libra-sla-auth':token()}});if(!response.ok)throw new Error(`SLA monitor gagal diantrikan: HTTP ${response.status}.`);console.log(JSON.stringify({event:'LIBRA_SLA_MONITOR_QUEUED',status:response.status}));};
+export const config={schedule:'*/15 * * * *'};
