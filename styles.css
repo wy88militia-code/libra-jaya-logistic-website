@@ -109,3 +109,31 @@
     margin-top: 22px;
   }
 }
+
+
+/* Papua cargo project illustration */
+.papua-illustration {
+  display: block;
+  width: 100%;
+  max-width: 560px;
+  height: auto;
+  max-height: 250px;
+  object-fit: contain;
+  margin: -16px auto 20px;
+  filter: drop-shadow(0 18px 30px #00101f80);
+}
+
+@media (orientation: landscape) and (min-width: 700px) and (max-height: 520px) {
+  .papua-illustration {
+    max-height: 150px;
+    margin-top: -8px;
+    margin-bottom: 10px;
+  }
+}
+
+@media (max-width: 540px) {
+  .papua-illustration {
+    max-height: 220px;
+    margin-top: -8px;
+  }
+}
