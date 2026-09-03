@@ -137,3 +137,23 @@
     margin-top: -8px;
   }
 }
+
+
+/* JL Express panel is grouped with the main service list. */
+.services .jl-card {
+  margin: 42px 0 0;
+}
+
+@media (orientation: landscape) and (min-width: 700px) {
+  .services .jl-card {
+    width: 100%;
+    margin: 42px 0 0;
+    border-radius: 28px;
+  }
+}
+
+@media (max-width: 540px) {
+  .services .jl-card {
+    margin: 32px 0 0;
+  }
+}
