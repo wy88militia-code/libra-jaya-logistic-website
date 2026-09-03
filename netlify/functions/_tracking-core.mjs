@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { getBooking, updateBooking } from './_booking-core.mjs';
+import { createOperationalNotification } from './_notification-core.mjs';
 import { queueTrackingWebhook } from './_partner-webhook.mjs';
 
 const TRACKING_STORE='libra-tracking';
@@ -37,6 +38,11 @@ export async function addTrackingEvent(input={}){
   if(['HELD','DAMAGED','CLAIM_PROCESS'].includes(status)){patch.hasIncident=true;patch.incidentStatus=status;patch.incidentNote=note;patch.claimStatus=event.claimStatus;patch.claimReference=event.claimReference;}
   const updatedBooking=await updateBooking(bookingId,patch);let webhookDispatch=null,webhookQueueError=null;
   try{webhookDispatch=await queueTrackingWebhook(event,updatedBooking);}catch(error){webhookQueueError=String(error?.message||error).slice(0,300);}
+  try{
+    if(status==='DELIVERED')await createOperationalNotification({partnerId:booking.partnerId,type:'DELIVERED',severity:'SUCCESS',title:'Kiriman telah diterima',message:`Booking ${bookingId} telah diterima oleh ${receiverName}. POD tersedia di history/tracking.`,reference:bookingId,partnerLink:'/partner/history.html',adminLink:'/admin-courier',dedupeKey:`delivered:${eventId}`,metadata:{bookingId,eventId,podId,receiverName}});
+    if(['HELD','DAMAGED','CLAIM_PROCESS'].includes(status))await createOperationalNotification({partnerId:booking.partnerId,type:'INCIDENT',severity:status==='DAMAGED'?'CRITICAL':'WARNING',title:`Insiden kiriman: ${status}`,message:`Booking ${bookingId}: ${note}`,reference:bookingId,partnerLink:'/partner/history.html',adminLink:'/admin-claims',dedupeKey:`incident:${eventId}`,metadata:{bookingId,eventId,status,claimStatus:event.claimStatus,claimReference:event.claimReference}});
+    if(webhookQueueError)await createOperationalNotification({partnerId:booking.partnerId,type:'WEBHOOK_QUEUE_ERROR',severity:'CRITICAL',title:'Webhook tracking gagal diantrikan',message:`Event ${status} untuk booking ${bookingId} gagal masuk antrean webhook: ${webhookQueueError}`,reference:bookingId,partnerLink:'/partner/webhook-control',adminLink:'/admin-webhook-control',dedupeKey:`webhook-queue:${eventId}`,metadata:{bookingId,eventId,error:webhookQueueError}});
+  }catch{}
   return {...event,webhookDispatch,webhookQueueError};
 }
 export async function listTrackingEvents(bookingId,limit=100){const {blobs}=await trackingStore().list({prefix:`event/${bookingId}/`});const selected=blobs.sort((a,b)=>a.key.localeCompare(b.key)).slice(-Math.max(1,Math.min(limit,300)));const rows=[];for(const blob of selected){const event=await trackingStore().get(blob.key,{type:'json'});if(event)rows.push(event);}return rows;}
