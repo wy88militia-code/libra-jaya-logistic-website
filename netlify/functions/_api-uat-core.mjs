@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { listApiLogsForPartner } from './_api-auth.mjs';
 import { getPartner, getWallet, normalizePartnerId } from './_partner-core.mjs';
+import { getRatePlan } from './_rate-plan-core.mjs';
 
 const UAT_STORE='libra-api-uat';
 const ONBOARDING_STORE='libra-api-onboarding';
@@ -57,7 +58,7 @@ export async function setFinalDecision(partnerId,decision,adminUser='admin'){
 }
 
 export async function activateProduction(partnerId,adminUser='admin'){
-  const id=normalizePartnerId(partnerId);const evidence=await buildUatEvidence(id);if(evidence.record?.finalDecision!=='PASS')throw new Error('UAT belum mendapat keputusan final PASS.');if(evidence.wallet.requiredDeposit<=0)throw new Error('Minimum opening deposit belum ditetapkan.');if(!evidence.wallet.depositReady)throw new Error('Saldo deposit belum memenuhi minimum opening deposit.');if(evidence.checks.webhook.status!=='PASS')throw new Error('Webhook UAT belum PASS.');const saved=await saveUatRecord({...evidence.record,productionEnabled:true,productionEnabledAt:now(),productionEnabledBy:String(adminUser||'admin').slice(0,80)});const app=saved.applicationId?await getOnboardingApplication(saved.applicationId):null;if(app)await saveApplication({...app,status:'PRODUCTION_ACTIVE',updatedAt:now()});return saved;
+  const id=normalizePartnerId(partnerId);const evidence=await buildUatEvidence(id);if(evidence.record?.finalDecision!=='PASS')throw new Error('UAT belum mendapat keputusan final PASS.');if(evidence.wallet.requiredDeposit<=0)throw new Error('Minimum opening deposit belum ditetapkan.');if(!evidence.wallet.depositReady)throw new Error('Saldo deposit belum memenuhi minimum opening deposit.');if(evidence.checks.webhook.status!=='PASS')throw new Error('Webhook UAT belum PASS.');const ratePlan=await getRatePlan(id);const activeRules=(ratePlan?.rules||[]).filter(rule=>rule.active!==false);if(!ratePlan||ratePlan.status!=='ACTIVE'||!activeRules.length)throw new Error('Rate Plan partner belum ACTIVE atau belum memiliki rule harga aktif. Konfigurasi Rate Plan sebelum mengaktifkan Production.');const saved=await saveUatRecord({...evidence.record,productionEnabled:true,productionEnabledAt:now(),productionEnabledBy:String(adminUser||'admin').slice(0,80),productionRatePlanName:ratePlan.planName,productionRatePlanConfirmedAt:now()});const app=saved.applicationId?await getOnboardingApplication(saved.applicationId):null;if(app)await saveApplication({...app,status:'PRODUCTION_ACTIVE',ratePlanStatus:ratePlan.status,updatedAt:now()});return saved;
 }
 
 function extractOutputText(response){if(typeof response?.output_text==='string'&&response.output_text)return response.output_text;for(const item of response?.output||[]){for(const content of item?.content||[]){if(content?.type==='output_text'&&content.text)return content.text;}}return '';}
