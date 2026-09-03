@@ -3,6 +3,7 @@ import { getStore } from '@netlify/blobs';
 import { getOnboardingApplication, linkApplicationToPartner } from './_api-uat-core.mjs';
 import { createPartnerActivation } from './_partner-activation.mjs';
 import { getPartner, makeApiCredentials, newPinHash, normalizePhone, savePartner } from './_partner-core.mjs';
+import { ensureApiPartnerRatePlan } from './_rate-plan-core.mjs';
 
 const ONBOARDING_STORE='libra-api-onboarding';
 const now=()=>new Date().toISOString();
@@ -55,6 +56,7 @@ export async function approveApplicationAndCreateUat(applicationId,adminUser='ad
 
   await savePartner(partner);
   try{
+    await ensureApiPartnerRatePlan(partnerId,application.companyName,adminUser);
     await linkApplicationToPartner(application.applicationId,partnerId);
     const activation=await createPartnerActivation(partnerId,application.applicationId,{ttlHours:72});
     const latest=await getOnboardingApplication(application.applicationId);
@@ -68,11 +70,12 @@ export async function approveApplicationAndCreateUat(applicationId,adminUser='ad
       activationIssuedAt:createdAt,
       activationExpiresAt:activation.expiresAt,
       credentialsClaimedAt:null,
+      ratePlanStatus:'INACTIVE',
       updatedAt:now(),
     });
     return {applicationId:application.applicationId,companyName:application.companyName,partnerId,activationId:activation.activationId,activationToken:activation.token,activationExpiresAt:activation.expiresAt,environment:'UAT'};
   }catch(error){
     await savePartner({...partner,status:'PENDING',apiLifecycle:'SETUP_ERROR',setupError:String(error?.message||'UAT setup failed').slice(0,500),updatedAt:now()});
-    throw new Error(`Partner ID ${partnerId} sempat dibuat tetapi UAT/aktivasi gagal disiapkan. Akun dikunci PENDING. ${error?.message||''}`.trim());
+    throw new Error(`Partner ID ${partnerId} sempat dibuat tetapi UAT/aktivasi/rate plan gagal disiapkan. Akun dikunci PENDING. ${error?.message||''}`.trim());
   }
 }
