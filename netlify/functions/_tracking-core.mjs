@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { getBooking, updateBooking } from './_booking-core.mjs';
+import { queueTrackingWebhook } from './_partner-webhook.mjs';
 
 const TRACKING_STORE='libra-tracking';
 const POD_STORE='libra-pod';
@@ -34,7 +35,9 @@ export async function addTrackingEvent(input={}){
   const patch={status,currentTrackingStatus:status,lastTrackingAt:createdAt};
   if(status==='DELIVERED'){patch.deliveredAt=createdAt;patch.receiverName=receiverName;patch.podId=podId;patch.deliveryLatitude=latitude;patch.deliveryLongitude=longitude;patch.deliveryAccuracyMeters=accuracy;}
   if(['HELD','DAMAGED','CLAIM_PROCESS'].includes(status)){patch.hasIncident=true;patch.incidentStatus=status;patch.incidentNote=note;patch.claimStatus=event.claimStatus;patch.claimReference=event.claimReference;}
-  await updateBooking(bookingId,patch);return event;
+  const updatedBooking=await updateBooking(bookingId,patch);let webhookDispatch=null,webhookQueueError=null;
+  try{webhookDispatch=await queueTrackingWebhook(event,updatedBooking);}catch(error){webhookQueueError=String(error?.message||error).slice(0,300);}
+  return {...event,webhookDispatch,webhookQueueError};
 }
 export async function listTrackingEvents(bookingId,limit=100){const {blobs}=await trackingStore().list({prefix:`event/${bookingId}/`});const selected=blobs.sort((a,b)=>a.key.localeCompare(b.key)).slice(-Math.max(1,Math.min(limit,300)));const rows=[];for(const blob of selected){const event=await trackingStore().get(blob.key,{type:'json'});if(event)rows.push(event);}return rows;}
 export async function listIncidentEvents(limit=200){const {blobs}=await trackingStore().list({prefix:'event/'});const selected=blobs.sort((a,b)=>b.key.localeCompare(a.key)).slice(0,1000);const rows=[];for(const blob of selected){const event=await trackingStore().get(blob.key,{type:'json'});if(event&&['HELD','DAMAGED','CLAIM_PROCESS'].includes(event.status))rows.push(event);if(rows.length>=limit)break;}return rows;}

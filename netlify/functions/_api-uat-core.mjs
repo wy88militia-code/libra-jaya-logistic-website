@@ -1,3 +1,4 @@
+import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { listApiLogsForPartner } from './_api-auth.mjs';
 import { getPartner, getWallet, normalizePartnerId } from './_partner-core.mjs';
@@ -8,6 +9,7 @@ const uatStore=()=>getStore(UAT_STORE);
 const onboardingStore=()=>getStore(ONBOARDING_STORE);
 const now=()=>new Date().toISOString();
 const pass=(ok,detail)=>({status:ok?'PASS':'NOT_PASSED',detail});
+const newWebhookSecret=()=>`whsec_${crypto.randomBytes(32).toString('base64url')}`;
 
 export async function listOnboardingApplications(limit=100){
   const store=onboardingStore();const {blobs}=await store.list({prefix:'application/'});const rows=[];
@@ -22,31 +24,31 @@ export async function saveUatRecord(record){const id=normalizePartnerId(record?.
 
 export async function linkApplicationToPartner(applicationId,partnerId){
   const application=await getOnboardingApplication(applicationId);if(!application)throw new Error('Pengajuan onboarding tidak ditemukan.');const id=normalizePartnerId(partnerId);const partner=await getPartner(id);if(!partner)throw new Error('Partner ID belum dibuat di modul Partner & Deposit.');
-  const existing=await getUatRecord(id);const record=await saveUatRecord({...existing,partnerId:id,applicationId:application.applicationId,companyName:partner.companyName||application.companyName,webhookStatus:existing?.webhookStatus||'NOT_TESTED',webhookNote:existing?.webhookNote||'',requiredDeposit:Math.max(0,Number(existing?.requiredDeposit)||0),finalDecision:existing?.finalDecision||'PENDING',productionEnabled:Boolean(existing?.productionEnabled),createdAt:existing?.createdAt||now()});
-  await saveApplication({...application,partnerId:id,status:'UAT',uatLinkedAt:now(),updatedAt:now()});return record;
+  const existing=await getUatRecord(id);const createdSecret=!existing?.webhookSecret?newWebhookSecret():null;const record=await saveUatRecord({...existing,partnerId:id,applicationId:application.applicationId,companyName:partner.companyName||application.companyName,webhookSecret:existing?.webhookSecret||createdSecret,webhookStatus:existing?.webhookStatus||'NOT_TESTED',webhookNote:existing?.webhookNote||'Menunggu callback test otomatis.',requiredDeposit:Math.max(0,Number(existing?.requiredDeposit)||0),finalDecision:existing?.finalDecision||'PENDING',productionEnabled:Boolean(existing?.productionEnabled),createdAt:existing?.createdAt||now()});
+  await saveApplication({...application,partnerId:id,status:'UAT',uatLinkedAt:now(),updatedAt:now()});return {...record,createdWebhookSecret:createdSecret};
 }
 
 function groupByReference(logs){const map=new Map();for(const log of logs){if(!log.reference)continue;const key=String(log.reference);if(!map.has(key))map.set(key,[]);map.get(key).push(log);}return map;}
 export async function buildUatEvidence(partnerId){
   const id=normalizePartnerId(partnerId);const record=await getUatRecord(id);const allLogs=await listApiLogsForPartner(id,700);const logs=allLogs.filter(log=>String(log.environment||'').toUpperCase()==='UAT');
   const successful=logs.filter(log=>log.status>=200&&log.status<300);const quoteSuccess=logs.some(log=>log.action==='QUOTE'&&log.status>=200&&log.status<300);const bookingLogs=logs.filter(log=>log.action==='BOOKING_UAT'&&[200,201].includes(log.status));const bookingSuccess=bookingLogs.length>0;const refGroups=groupByReference(bookingLogs);let idem=false,idemRef=null;for(const [ref,items] of refGroups){if(items.length>=2&&items.some(x=>x.status===201)&&items.some(x=>x.status===200)){idem=true;idemRef=ref;break;}}
-  const trackingSuccess=logs.some(log=>log.action==='TRACKING'&&log.status===200);const clientError=logs.some(log=>log.status>=400&&log.status<500);const serverErrors=logs.filter(log=>log.status>=500);const authSuccess=successful.length>0;const webhookPass=record?.webhookStatus==='PASS';
+  const trackingSuccess=logs.some(log=>log.action==='TRACKING'&&log.status===200);const clientError=logs.some(log=>log.status>=400&&log.status<500);const serverErrors=logs.filter(log=>log.status>=500);const authSuccess=successful.length>0;const webhookPass=record?.webhookStatus==='PASS';const errorHandlingPass=!serverErrors.length&&clientError;
   const checks={
     authentication:pass(authSuccess,authSuccess?'HMAC tervalidasi melalui request UAT yang berhasil.':'Belum ada request UAT sukses.'),
     quote:pass(quoteSuccess,quoteSuccess?'POST /api/v1/quote berhasil.':'Quote UAT belum berhasil.'),
     booking:pass(bookingSuccess,bookingSuccess?'Booking UAT dry-run berhasil tanpa debit saldo.':'Booking UAT belum berhasil.'),
     idempotency:pass(idem,idem?`Retry menghasilkan Booking ID yang sama: ${idemRef}.`:'Belum ada bukti retry 201 → 200 dengan Booking ID sama.'),
     tracking:pass(trackingSuccess,trackingSuccess?'GET tracking berhasil pada booking milik partner.':'Tracking UAT belum berhasil.'),
-    webhook:{status:webhookPass?'PASS':record?.webhookStatus==='FAIL'?'FAIL':'NOT_TESTED',detail:webhookPass?'Webhook/callback dinyatakan lulus UAT oleh admin.':record?.webhookNote||'Webhook belum diuji/ditandai admin.'},
-    errorHandling:{status:serverErrors.length?'FAIL':clientError?'PASS':'NOT_TESTED',detail:serverErrors.length?`${serverErrors.length} error server 5xx terdeteksi.`:clientError?'Sistem mengembalikan error 4xx terkontrol selama UAT.':'Belum ada skenario error terkontrol.'},
+    webhook:{status:webhookPass?'PASS':record?.webhookStatus==='FAIL'?'FAIL':record?.webhookStatus==='TESTING'?'TESTING':'NOT_TESTED',detail:webhookPass?(record?.webhookNote||'Callback test otomatis berhasil.'):record?.webhookNote||'Callback test otomatis belum dijalankan.'},
+    errorHandling:{status:serverErrors.length?'FAIL':clientError?'PASS':'NOT_TESTED',detail:serverErrors.length?`${serverErrors.length} error server 5xx terdeteksi.`:clientError?'Sistem mengembalikan error 4xx terkontrol selama UAT.':'Belum ada skenario error 4xx terkontrol.'},
   };
-  const corePass=authSuccess&&quoteSuccess&&bookingSuccess;const fullPass=corePass&&idem&&trackingSuccess&&webhookPass&&!serverErrors.length;let baselineVerdict='NOT_READY';if(logs.length){baselineVerdict=serverErrors.length?'FAIL':fullPass?'PASS':corePass?'CONDITIONAL_PASS':'FAIL';}
+  const corePass=authSuccess&&quoteSuccess&&bookingSuccess;const fullPass=corePass&&idem&&trackingSuccess&&webhookPass&&errorHandlingPass&&!serverErrors.length;let baselineVerdict='NOT_READY';if(logs.length||record?.lastWebhookTestAt){baselineVerdict=serverErrors.length?'FAIL':fullPass?'PASS':corePass?'CONDITIONAL_PASS':'FAIL';}
   const wallet=await getWallet(id);const requiredDeposit=Math.max(0,Number(record?.requiredDeposit)||0);const depositReady=requiredDeposit>0&&Number(wallet.balance)>=requiredDeposit;const stage=record?.productionEnabled?'PRODUCTION_ACTIVE':record?.finalDecision==='PASS'?(depositReady?'READY_FOR_PRODUCTION':'WAITING_DEPOSIT'):'UAT';
   return {partnerId:id,record,logs:logs.slice(0,100),checks,baselineVerdict,stats:{uatRequests:logs.length,success:successful.length,clientErrors:logs.filter(x=>x.status>=400&&x.status<500).length,serverErrors:serverErrors.length},wallet:{balance:Number(wallet.balance)||0,requiredDeposit,depositReady},stage};
 }
 
-export async function updateUatSettings(partnerId,{webhookStatus,webhookNote,requiredDeposit}={}){
-  const id=normalizePartnerId(partnerId);const current=await getUatRecord(id);if(!current)throw new Error('Partner belum dihubungkan ke pengajuan UAT.');const allowed=['NOT_TESTED','PASS','FAIL'];const next={...current};if(webhookStatus!==undefined){const value=String(webhookStatus).toUpperCase();if(!allowed.includes(value))throw new Error('Status webhook tidak valid.');next.webhookStatus=value;}if(webhookNote!==undefined)next.webhookNote=String(webhookNote||'').trim().slice(0,700);if(requiredDeposit!==undefined){const amount=Math.trunc(Number(requiredDeposit));if(!Number.isFinite(amount)||amount<0||amount>10000000000)throw new Error('Minimum deposit tidak valid.');next.requiredDeposit=amount;}return saveUatRecord(next);
+export async function updateUatSettings(partnerId,{requiredDeposit}={}){
+  const id=normalizePartnerId(partnerId);const current=await getUatRecord(id);if(!current)throw new Error('Partner belum dihubungkan ke pengajuan UAT.');const next={...current};if(requiredDeposit!==undefined){const amount=Math.trunc(Number(requiredDeposit));if(!Number.isFinite(amount)||amount<0||amount>10000000000)throw new Error('Minimum deposit tidak valid.');next.requiredDeposit=amount;}return saveUatRecord(next);
 }
 
 export async function setFinalDecision(partnerId,decision,adminUser='admin'){
@@ -54,7 +56,7 @@ export async function setFinalDecision(partnerId,decision,adminUser='admin'){
 }
 
 export async function activateProduction(partnerId,adminUser='admin'){
-  const id=normalizePartnerId(partnerId);const evidence=await buildUatEvidence(id);if(evidence.record?.finalDecision!=='PASS')throw new Error('UAT belum mendapat keputusan final PASS.');if(evidence.wallet.requiredDeposit<=0)throw new Error('Minimum opening deposit belum ditetapkan.');if(!evidence.wallet.depositReady)throw new Error('Saldo deposit belum memenuhi minimum opening deposit.');const saved=await saveUatRecord({...evidence.record,productionEnabled:true,productionEnabledAt:now(),productionEnabledBy:String(adminUser||'admin').slice(0,80)});const app=saved.applicationId?await getOnboardingApplication(saved.applicationId):null;if(app)await saveApplication({...app,status:'PRODUCTION_ACTIVE',updatedAt:now()});return saved;
+  const id=normalizePartnerId(partnerId);const evidence=await buildUatEvidence(id);if(evidence.record?.finalDecision!=='PASS')throw new Error('UAT belum mendapat keputusan final PASS.');if(evidence.wallet.requiredDeposit<=0)throw new Error('Minimum opening deposit belum ditetapkan.');if(!evidence.wallet.depositReady)throw new Error('Saldo deposit belum memenuhi minimum opening deposit.');if(evidence.checks.webhook.status!=='PASS')throw new Error('Webhook UAT belum PASS.');const saved=await saveUatRecord({...evidence.record,productionEnabled:true,productionEnabledAt:now(),productionEnabledBy:String(adminUser||'admin').slice(0,80)});const app=saved.applicationId?await getOnboardingApplication(saved.applicationId):null;if(app)await saveApplication({...app,status:'PRODUCTION_ACTIVE',updatedAt:now()});return saved;
 }
 
 function extractOutputText(response){if(typeof response?.output_text==='string'&&response.output_text)return response.output_text;for(const item of response?.output||[]){for(const content of item?.content||[]){if(content?.type==='output_text'&&content.text)return content.text;}}return '';}
