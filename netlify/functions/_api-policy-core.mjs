@@ -43,7 +43,7 @@ export async function enforceApiPolicyPreAuth(request,partner,environment){
   const clientIp=getClientIp(request);if(environment==='PRODUCTION'&&Array.isArray(policy.ipAllowlist)&&policy.ipAllowlist.length){if(!clientIp||!policy.ipAllowlist.some(rule=>ipMatchesRule(clientIp,rule)))throw apiError('API_IP_NOT_ALLOWED','IP sumber tidak termasuk allowlist Production API partner.',403);}
   return {policy,clientIp};
 }
-function buckets(){const d=new Date();const iso=d.toISOString();return {minute:iso.slice(0,16),day:iso.slice(0,10),month:iso.slice(0,7),quarterHour:`${iso.slice(0,13)}:${String(Math.floor(d.getUTCMinutes()/15)*15).padStart(2,'0')}`,tenMinute:`${iso.slice(0,14)}${Math.floor(d.getUTCMinutes()/10)}`};}
+function buckets(){const d=new Date(Date.now()+9*60*60*1000);const iso=d.toISOString();const minute=d.getUTCMinutes();return {minute:iso.slice(0,16),day:iso.slice(0,10),month:iso.slice(0,7),quarterHour:`${iso.slice(0,13)}:${String(Math.floor(minute/15)*15).padStart(2,'0')}`,tenMinute:`${iso.slice(0,14)}${Math.floor(minute/10)}`};}
 async function incrementCounter(key,limit,code,message){
   const store=securityStore();for(let attempt=0;attempt<8;attempt+=1){const entry=await store.getWithMetadata(key,{type:'json',consistency:'strong'});const current=entry?.data||{count:0};if(limit>0&&Number(current.count)>=limit)throw apiError(code,message,429);const next={count:Number(current.count||0)+1,updatedAt:now()};const result=await store.setJSON(key,next,entry?{onlyIfMatch:entry.etag}:{onlyIfNew:true});if(result.modified)return next.count;}throw apiError('API_USAGE_BUSY','Penghitung quota sedang sibuk. Coba kembali.',503);
 }
