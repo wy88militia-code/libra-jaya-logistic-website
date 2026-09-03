@@ -1,9 +1,11 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { getBooking } from './_booking-core.mjs';
+import { queueWeightBillingReview } from './_weight-billing-bridge.mjs';
 
 const STORE='libra-weights';
 const store=()=>getStore(STORE);
+const manifestStore=()=>getStore('libra-manifests');
 const clean=(v,m=180)=>String(v??'').trim().slice(0,m);
 const now=()=>new Date().toISOString();
 const num=v=>Number.isFinite(Number(v))?Number(v):null;
@@ -21,8 +23,11 @@ async function appendEvent(record,input={}){const head=await store().get(`head/$
 
 function calcVolumetric(i={}){const l=num(i.lengthCm),w=num(i.widthCm),h=num(i.heightCm),pieces=Math.max(1,Math.trunc(Number(i.packageCount||1))),divisor=Math.max(1,Math.trunc(Number(i.volumetricDivisor||6000)));if(!(l>0&&w>0&&h>0))return 0;return kg((l*w*h*pieces)/divisor);}
 
+async function assertManifestAllowsReweigh(bookingId){const activeId=await manifestStore().get(`active-booking/${bookingId}`,{type:'text',consistency:'strong'});if(!activeId)return null;const manifest=await manifestStore().get(`manifest/${activeId}`,{type:'json',consistency:'strong'});if(!manifest)return null;const item=manifest.items?.[bookingId];if(manifest.status!=='OPEN')throw new Error(`Reweigh ditolak: booking terkunci di manifest ${activeId} status ${manifest.status}.`);if(Number(item?.upliftWeightKg||0)>0)throw new Error(`Reweigh ditolak: booking sudah memiliki uplift di manifest ${activeId}.`);return {manifestId:activeId,status:manifest.status};}
+
 export async function recordReweigh(input={},actor='admin'){
  const bookingId=clean(input.bookingId,120);if(!bookingId)throw new Error('Booking ID wajib.');const booking=await getBooking(bookingId);if(!booking)throw new Error('Booking tidak ditemukan.');
+ await assertManifestAllowsReweigh(bookingId);
  const actual=num(input.actualWeightKg);if(!(actual>0&&actual<=100000))throw new Error('Actual weight tidak valid.');
  const packageCount=Math.max(1,Math.trunc(Number(input.packageCount||booking.packageCount||booking.koli||1)));
  const volumetricDivisor=Math.max(1,Math.trunc(Number(input.volumetricDivisor||6000)));
@@ -32,8 +37,11 @@ export async function recordReweigh(input={},actor='admin'){
  const declaredWeightKg=kg(Number(booking.weightKg||0));
  const varianceKg=kg(actual-declaredWeightKg),variancePct=declaredWeightKg>0?Math.round((varianceKg/declaredWeightKg)*10000)/100:null;
  const reweighCount=Number(prev?.reweighCount||0)+1;
- const t=now(),record={bookingId,declaredWeightKg,actualWeightKg:kg(actual),volumetricWeightKg,chargeableWeightKg,packageCount,lengthCm:num(input.lengthCm),widthCm:num(input.widthCm),heightCm:num(input.heightCm),volumetricDivisor,varianceKg,variancePct,reweighCount,scaleId:clean(input.scaleId,120)||null,reason:clean(input.reason,500)||null,status:'VERIFIED',billingReviewRequired:Math.abs(chargeableWeightKg-declaredWeightKg)>0.01,createdAt:prev?.createdAt||t,createdBy:prev?.createdBy||clean(actor,100),updatedAt:t,updatedBy:clean(actor,100)};
- const result=await store().setJSON(key(bookingId),record,previous?.etag?{onlyIfMatch:previous.etag}:{onlyIfNew:true});if(!result.modified)throw new Error('Data timbang berubah di proses lain. Refresh lalu coba lagi.');await appendEvent(record,{type:prev?'REWEIGH_RECORDED':'WEIGHT_VERIFIED',actor,actualWeightKg:record.actualWeightKg,volumetricWeightKg,chargeableWeightKg,reason:record.reason,scaleId:record.scaleId});return record;
+ const billingReviewRequired=Math.abs(chargeableWeightKg-declaredWeightKg)>0.01;
+ const t=now(),record={bookingId,declaredWeightKg,actualWeightKg:kg(actual),volumetricWeightKg,chargeableWeightKg,packageCount,lengthCm:num(input.lengthCm),widthCm:num(input.widthCm),heightCm:num(input.heightCm),volumetricDivisor,varianceKg,variancePct,reweighCount,scaleId:clean(input.scaleId,120)||null,reason:clean(input.reason,500)||null,status:'VERIFIED',billingReviewRequired,billingReviewStatus:billingReviewRequired?'PENDING_APPROVAL':'NOT_REQUIRED',createdAt:prev?.createdAt||t,createdBy:prev?.createdBy||clean(actor,100),updatedAt:t,updatedBy:clean(actor,100)};
+ const result=await store().setJSON(key(bookingId),record,previous?.etag?{onlyIfMatch:previous.etag}:{onlyIfNew:true});if(!result.modified)throw new Error('Data timbang berubah di proses lain. Refresh lalu coba lagi.');await appendEvent(record,{type:prev?'REWEIGH_RECORDED':'WEIGHT_VERIFIED',actor,actualWeightKg:record.actualWeightKg,volumetricWeightKg,chargeableWeightKg,reason:record.reason,scaleId:record.scaleId});
+ if(billingReviewRequired)await queueWeightBillingReview({bookingId,partnerId:booking.partnerId,reweighCount,declaredWeightKg,previousChargeableWeightKg:prev?.chargeableWeightKg??null,actualWeightKg:record.actualWeightKg,volumetricWeightKg,chargeableWeightKg,varianceKg,variancePct,reason:record.reason,scaleId:record.scaleId,actor});
+ return record;
 }
 
 export async function listWeightEvents(id,limit=200){const {blobs}=await store().list({prefix:`event/${clean(id,120)}/`}),rows=[];for(const b of blobs.sort((a,b)=>a.key.localeCompare(b.key)).slice(-Math.min(limit,500))){const r=await store().get(b.key,{type:'json'});if(r)rows.push(r);}return rows;}
