@@ -47,14 +47,16 @@ export async function setRatePlanStatus(partnerId,status,adminUser='admin'){
 }
 
 export async function resolvePartnerRate(partnerId,route={}){
-  const plan=await getRatePlan(partnerId);if(plan?.status==='ACTIVE'){
+  const plan=await getRatePlan(partnerId);
+  if(plan){
+    if(plan.status!=='ACTIVE')return {rate:null,source:'RATE_PLAN_INACTIVE',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status,cutoffWit:normalizeCutoff()};
     const rules=(plan.rules||[]).filter(row=>row.active!==false);const routeCode=upper(route.kodeRute);const zone=upper(route.zonaTarif);
     const rule=rules.find(row=>row.matchType==='ROUTE'&&row.matchValue===routeCode)||rules.find(row=>row.matchType==='ZONE'&&row.matchValue===zone)||rules.find(row=>row.matchType==='DEFAULT');
     if(rule)return {rate:rule,source:'PARTNER_RATE_PLAN',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status};
     return {rate:null,source:'PARTNER_RATE_PLAN_NO_MATCH',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status,cutoffWit:normalizeCutoff()};
   }
   const legacy=legacyRate(route);if(legacy)return {rate:legacy,source:'LEGACY_RATE_TABLE',planId:null,planName:'Legacy Rate Table',planStatus:'ACTIVE'};
-  return {rate:null,source:plan?.status==='INACTIVE'?'RATE_PLAN_INACTIVE':'NO_RATE_PLAN',planId:plan?.partnerId||null,planName:plan?.planName||null,planStatus:plan?.status||null,cutoffWit:normalizeCutoff()};
+  return {rate:null,source:'NO_RATE_PLAN',planId:null,planName:null,planStatus:null,cutoffWit:normalizeCutoff()};
 }
 
 export function calculateRateAmount(rate,weightKg){
