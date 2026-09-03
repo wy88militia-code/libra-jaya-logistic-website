@@ -43,4 +43,11 @@ Response sukses memuat Production API Key dan Production API Secret. Response me
 Partner wajib menyimpan API Secret di server-side secret manager atau environment variable. Jangan menyimpan API Secret di browser, source code publik, spreadsheet, atau chat.
 
 ## Rotasi
-Jika Production API Secret hilang atau dicurigai bocor, credential tidak ditampilkan ulang. Admin Libra harus melakukan rotasi credential pada tahap pengembangan berikutnya.
+Jika Production API Secret hilang atau dicurigai bocor:
+1. Admin Libra membuka **API Partner & Audit**.
+2. Tekan **Rotate Production** pada Partner ID terkait.
+3. API Key/Secret Production lama langsung tidak berlaku.
+4. Status partner berubah kembali menjadi `READY_TO_CLAIM`.
+5. Partner login ke Dashboard API dan menekan **Ambil Kredensial Production** untuk mengambil credential baru satu kali.
+
+Secret baru tidak pernah ditampilkan di halaman admin.
