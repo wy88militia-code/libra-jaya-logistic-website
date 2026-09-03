@@ -23,8 +23,8 @@ async function createForAudience(audience,input={}){
 
 export async function createOperationalNotification(input={}){
   const id=normalizePartnerId(input.partnerId);const rows=[];
-  if(input.notifyPartner!==false&&id){const row=await createForAudience(`partner/${id}`,{...input,partnerId:id,dedupeKey:input.dedupeKey?`partner:${id}:${input.dedupeKey}`:''});if(row)rows.push(row);}
-  if(input.notifyAdmin!==false){const row=await createForAudience('admin',{...input,partnerId:id,dedupeKey:input.dedupeKey?`admin:${input.dedupeKey}`:''});if(row)rows.push(row);}
+  if(input.notifyPartner!==false&&id){const row=await createForAudience(`partner/${id}`,{...input,partnerId:id,link:input.partnerLink||input.link||null,dedupeKey:input.dedupeKey?`partner:${id}:${input.dedupeKey}`:''});if(row)rows.push(row);}
+  if(input.notifyAdmin!==false){const row=await createForAudience('admin',{...input,partnerId:id,link:input.adminLink||input.link||null,dedupeKey:input.dedupeKey?`admin:${input.dedupeKey}`:''});if(row)rows.push(row);}
   return rows;
 }
 
