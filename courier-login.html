@@ -1,0 +1,11 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Portal Kurir | Libra Jaya Logistic</title>
+  <link rel="icon" type="image/webp" href="logo-libra-jaya.webp">
+  <style>*{box-sizing:border-box}body{margin:0;min-height:100vh;display:grid;place-items:center;padding:24px;background:#071b31;color:#10243d;font-family:Inter,system-ui}.card{width:min(440px,100%);background:#fff;border-radius:24px;padding:28px;box-shadow:0 24px 70px #0005}.logo{width:92px;display:block;margin:0 auto 14px}.eyebrow{text-align:center;font-weight:900;font-size:12px;letter-spacing:.12em;color:#ef312b}.card h1{text-align:center;margin:8px 0}.intro{text-align:center;color:#61758a}.field{display:grid;gap:6px;margin:14px 0}.field label{font-size:12px;font-weight:900}.field input{width:100%;padding:13px;border:1px solid #cbd8e6;border-radius:11px;font:inherit}.btn{width:100%;border:0;border-radius:11px;background:#ef312b;color:#fff;padding:13px;font-weight:900;font-size:15px}.status{min-height:20px;color:#b42318;font-size:13px}.note{margin-top:16px;background:#f3f7fa;border-radius:12px;padding:12px;font-size:12px;color:#61758a}</style>
+</head>
+<body><main class="card"><img class="logo" src="logo-libra-jaya.webp" alt="Libra Jaya Logistic"><div class="eyebrow">KHUSUS KURIR LIBRA</div><h1>Portal Kurir</h1><p class="intro">Masuk untuk melihat tugas pengiriman, scan AWB/QR, update tracking, GPS dan POD.</p><form id="courier-login-form"><div class="field"><label>Username Kurir</label><input id="courier-user" autocomplete="username" required autofocus></div><div class="field"><label>PIN</label><input id="courier-pin" type="password" inputmode="numeric" autocomplete="current-password" minlength="6" maxlength="12" required></div><div class="field"><label>OTP 6 digit <span style="font-weight:400">(jika aktif)</span></label><input id="courier-otp" inputmode="numeric" autocomplete="one-time-code" maxlength="6" pattern="[0-9]{6}"></div><button class="btn" type="submit">Masuk Portal Kurir</button><p id="courier-status" class="status" role="alert"></p></form><div class="note">Portal ini tidak menampilkan menu Finance, Partner, API, Accurate, atau administrasi perusahaan.</div></main><script src="courier-login.js"></script></body></html>
