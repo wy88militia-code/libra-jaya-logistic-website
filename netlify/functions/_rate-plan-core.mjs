@@ -1,5 +1,5 @@
 import { getStore } from '@netlify/blobs';
-import { normalizePartnerId } from './_partner-core.mjs';
+import { getPartner, normalizePartnerId } from './_partner-core.mjs';
 
 const STORE_NAME='libra-rate-plans';
 const DEFAULT_CUTOFF_WIT='14:00';
@@ -36,7 +36,7 @@ function legacyRate(route){
 export async function getRatePlan(partnerId){const id=normalizePartnerId(partnerId);if(!id)return null;return store().get(`partner/${id}`,{type:'json',consistency:'strong'});}
 export async function listRatePlans(){const {blobs}=await store().list({prefix:'partner/'});const rows=[];for(const blob of blobs){const row=await store().get(blob.key,{type:'json'});if(row)rows.push(row);}return rows.sort((a,b)=>String(a.partnerId).localeCompare(String(b.partnerId)));}
 export async function upsertRateRule(partnerId,input={},adminUser='admin'){
-  const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');const current=await getRatePlan(id);const rule=normalizeRule(input);const rules=[...(current?.rules||[])].filter(row=>row.ruleId!==rule.ruleId);rules.push(rule);rules.sort((a,b)=>a.matchType.localeCompare(b.matchType)||a.matchValue.localeCompare(b.matchValue));
+  const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');if(!await getPartner(id))throw new Error('Partner belum terdaftar.');const current=await getRatePlan(id);const rule=normalizeRule(input);const rules=[...(current?.rules||[])].filter(row=>row.ruleId!==rule.ruleId);rules.push(rule);rules.sort((a,b)=>a.matchType.localeCompare(b.matchType)||a.matchValue.localeCompare(b.matchValue));
   const stamp=now();const plan={partnerId:id,planName:text(input.planName||current?.planName||`Rate Plan ${id}`),status:upper(input.planStatus||current?.status||'ACTIVE')==='INACTIVE'?'INACTIVE':'ACTIVE',currency:'IDR',rules,createdAt:current?.createdAt||stamp,updatedAt:stamp,updatedBy:text(adminUser,80)};await store().setJSON(`partner/${id}`,plan);return plan;
 }
 export async function deleteRateRule(partnerId,ruleId,adminUser='admin'){
