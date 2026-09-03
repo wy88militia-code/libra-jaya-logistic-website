@@ -2,7 +2,7 @@ import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 
 const BACKUP_STORE='libra-backups';
-const PROTECTED_STORES=['libra-partners','libra-wallets','libra-bookings','libra-quotes','libra-tracking','libra-pod','libra-api-uat','libra-api-onboarding','libra-rate-plans','libra-api-policies','libra-master-sync','libra-webhook-deliveries','libra-notifications','libra-external-alerts','libra-admin-audit'];
+const PROTECTED_STORES=['libra-partners','libra-wallets','libra-bookings','libra-quotes','libra-tracking','libra-pod','libra-api-uat','libra-api-onboarding','libra-rate-plans','libra-api-policies','libra-master-sync','libra-webhook-deliveries','libra-notifications','libra-external-alerts','libra-sla-monitor','libra-admin-audit'];
 const IMMUTABLE_ON_RESTORE=new Set(['libra-admin-audit']);
 const EXCLUDED_PREFIXES=new Map([['libra-partners',['apikey/']]]);
 const now=()=>new Date().toISOString();
