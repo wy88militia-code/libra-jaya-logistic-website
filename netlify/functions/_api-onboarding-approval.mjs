@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { getOnboardingApplication, linkApplicationToPartner } from './_api-uat-core.mjs';
 import { createPartnerActivation } from './_partner-activation.mjs';
+import { ensureApiPolicy } from './_api-policy-core.mjs';
 import { getPartner, makeApiCredentials, newPinHash, normalizePhone, savePartner } from './_partner-core.mjs';
 import { ensureApiPartnerRatePlan } from './_rate-plan-core.mjs';
 
@@ -57,6 +58,7 @@ export async function approveApplicationAndCreateUat(applicationId,adminUser='ad
   await savePartner(partner);
   try{
     await ensureApiPartnerRatePlan(partnerId,application.companyName,adminUser);
+    await ensureApiPolicy(partnerId,adminUser);
     await linkApplicationToPartner(application.applicationId,partnerId);
     const activation=await createPartnerActivation(partnerId,application.applicationId,{ttlHours:72});
     const latest=await getOnboardingApplication(application.applicationId);
@@ -71,11 +73,12 @@ export async function approveApplicationAndCreateUat(applicationId,adminUser='ad
       activationExpiresAt:activation.expiresAt,
       credentialsClaimedAt:null,
       ratePlanStatus:'INACTIVE',
+      apiSecurityStatus:'ACTIVE',
       updatedAt:now(),
     });
     return {applicationId:application.applicationId,companyName:application.companyName,partnerId,activationId:activation.activationId,activationToken:activation.token,activationExpiresAt:activation.expiresAt,environment:'UAT'};
   }catch(error){
     await savePartner({...partner,status:'PENDING',apiLifecycle:'SETUP_ERROR',setupError:String(error?.message||'UAT setup failed').slice(0,500),updatedAt:now()});
-    throw new Error(`Partner ID ${partnerId} sempat dibuat tetapi UAT/aktivasi/rate plan gagal disiapkan. Akun dikunci PENDING. ${error?.message||''}`.trim());
+    throw new Error(`Partner ID ${partnerId} sempat dibuat tetapi UAT/aktivasi/rate plan/security policy gagal disiapkan. Akun dikunci PENDING. ${error?.message||''}`.trim());
   }
 }
