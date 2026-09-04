@@ -29,6 +29,7 @@ const PATH_ROLES=[
  [/^\/admin-audit-backup$/,['SUPERADMIN']],
  [/^\/admin-resilience$/,['SUPERADMIN']],
  [/^\/admin-privacy-security(?:\/simulation)?$/,['SUPERADMIN']],
+ [/^\/admin-go-live(?:\/simulation)?$/,['SUPERADMIN']],
  [/^\/admin-approvals$/,['SUPERADMIN','FINANCE','OPS']],
 ];
 
@@ -56,6 +57,7 @@ const PERMISSIONS={
  'api.security':['SUPERADMIN','OPS'],
  'backup.manage':['SUPERADMIN'],
  'privacy.manage':['SUPERADMIN'],
+ 'go_live.manage':['SUPERADMIN'],
  'approval.review':['SUPERADMIN','FINANCE','OPS'],
 };
 export function hasAdminPermission(role,permission){return (PERMISSIONS[permission]||['SUPERADMIN']).includes(normalizeAdminRole(role));}
