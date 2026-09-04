@@ -39,6 +39,10 @@ function mapWalletTransaction(tx){
   if(!map.bankClearing||!map.customerDeposit)return {ok:false,reason:'Mapping Bank Clearing/Customer Deposit belum lengkap.'};
   return {ok:true,type:'TOPUP_XENDIT',entries:[{role:'BANK_CLEARING',accountNo:map.bankClearing,debit:amount,credit:0},{role:'CUSTOMER_DEPOSIT',accountNo:map.customerDeposit,debit:0,credit:amount}]};
  }
+ if(source==='MANUAL_DEPOSIT'&&signed>0){
+  const bankAccountNo=clean(tx?.metadata?.bankAccountNo,80);if(!bankAccountNo||!map.customerDeposit)return {ok:false,reason:'Deposit manual belum memiliki akun bank Accurate / mapping Customer Deposit.'};
+  return {ok:true,type:'MANUAL_DEPOSIT',dynamicAccountNos:[bankAccountNo],entries:[{role:'BANK_ACCOUNT',accountNo:bankAccountNo,debit:amount,credit:0},{role:'CUSTOMER_DEPOSIT',accountNo:map.customerDeposit,debit:0,credit:amount}]};
+ }
  if(source==='BOOKING'&&signed<0){
   if(!map.customerDeposit||!map.serviceRevenue)return {ok:false,reason:'Mapping Customer Deposit/Service Revenue belum lengkap.'};
   return {ok:true,type:'BOOKING_REVENUE',entries:[{role:'CUSTOMER_DEPOSIT',accountNo:map.customerDeposit,debit:amount,credit:0},{role:'SERVICE_REVENUE',accountNo:map.serviceRevenue,debit:0,credit:amount}]};
@@ -87,6 +91,10 @@ async function discoverTransactions(limit=60){
 async function ensureAutoJob(tx,mapped){
  const {hash,job}=makeAutoJob(tx,mapped),key=autoJobKey(hash),created=await syncStore().setJSON(key,job,{onlyIfNew:true});if(created.modified)return job;
  const existing=await syncStore().get(key,{type:'json',consistency:'strong'});if(!existing)throw new Error('Auto job sedang dibuat proses lain.');if(!existing.autoEvent||existing.walletTransactionId!==tx.transactionId)throw new Error('Collision pada Accurate auto job. Posting dihentikan.');return existing;
+}
+
+async function validateDynamicAccounts(accurate,nos=[]){
+ const wanted=[...new Set((nos||[]).map(v=>clean(v,80)).filter(Boolean))];if(!wanted.length)return {ok:true,found:[]};const rows=[];let page=1,pageCount=1;do{const {data}=await accurate.accurateGet('glaccount','list',{'sp.pageSize':100,'sp.page':page,'fields':'id,no,name,accountType'});const batch=Array.isArray(data?.d)?data.d:[];rows.push(...batch);pageCount=Math.max(1,Math.min(Number(data?.sp?.pageCount)||1,100));page+=1;}while(page<=pageCount);const byNo=new Map(rows.map(r=>[clean(r?.no,80),r]));const found=wanted.map(no=>({no,row:byNo.get(no)||null})),missing=found.filter(x=>!x.row).map(x=>x.no);return {ok:missing.length===0,found,missing};
 }
 
 function normalizeDate(value){
@@ -170,6 +178,7 @@ async function processTransaction(tx){
  const accurate=await import('./_accurate-core.mjs'),payload=accurate.buildAccurateJournalPayload(job);
  try{
   const readiness=await accurate.verifyAccurateProductionReadiness();
+  if(mapped.dynamicAccountNos?.length){const check=await validateDynamicAccounts(accurate,mapped.dynamicAccountNos);if(!check.ok)return saveMarker(tx,'EXCEPTION',{jobId:job.jobId,journalNumber:job.journalNumber,reason:`Akun dinamis Accurate tidak ditemukan: ${check.missing.join(', ')}. Posting diblokir.`});}
   const duplicate=await lookupJournalVerification(accurate,payload,readiness.branch.id,null);
   if(duplicate.found){
    if(duplicate.verified)return markExistingVerified(tx,job,duplicate);
