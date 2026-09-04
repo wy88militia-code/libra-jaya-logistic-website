@@ -18,7 +18,7 @@ const PATH_ROLES=[
  [/^\/admin-manifests$/,['SUPERADMIN','OPS']],
  [/^\/admin-warehouse$/,['SUPERADMIN','OPS']],
  [/^\/admin-claims$/,['SUPERADMIN','FINANCE','OPS','CUSTOMER_SERVICE']],
- [/^\/admin-tickets$/,['SUPERADMIN','FINANCE','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-tickets(?:\/simulation)?$/,['SUPERADMIN','FINANCE','OPS','CUSTOMER_SERVICE']],
  [/^\/admin-sla-control$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
  [/^\/admin-api-onboarding$/,['SUPERADMIN','OPS']],
  [/^\/admin-api-uat$/,['SUPERADMIN','OPS']],
