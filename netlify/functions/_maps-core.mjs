@@ -23,7 +23,7 @@ function destinationQuery(destination={}){
 }
 
 function airportInfo(destination={}){
- const raw=clean(destination.hub||destination.bandaraAsal||'DJJ');
+ const raw=clean(destination.bandaraAsal||destination.hub||'DJJ');
  const upper=raw.toUpperCase();
  if(upper.includes('WMX')||upper.includes('WAMENA'))return {code:'WMX',label:'Bandara Wamena (WMX)',query:'Bandar Udara Wamena, Papua Pegunungan, Indonesia'};
  if(upper.includes('DJJ')||upper.includes('SENTANI')||upper.includes('DORTHEYS'))return {code:'DJJ',label:'Bandara Sentani (DJJ)',query:'Bandar Udara Internasional Dortheys Hiyo Eluay, Sentani, Papua, Indonesia'};
