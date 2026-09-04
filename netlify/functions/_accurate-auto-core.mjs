@@ -24,10 +24,12 @@ const accountMap=()=>({
 const digest=v=>crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex');
 const markerKey=id=>`auto-event/${clean(id,120)}`;
 const autoJobKey=hash=>`job/${hash}`;
+const norm=v=>String(v??'').normalize('NFKC').replace(/\s+/g,' ').trim().toLowerCase();
+const wait=ms=>new Promise(resolve=>setTimeout(resolve,ms));
 
 export function accurateAutoStatus(){
  const start=startAt(),startMs=new Date(start||0).getTime();
- return {enabled:autoEnabled(),postingEnabled:postingEnabled(),productionArmed:productionArmed(),startAt:start||null,startAtValid:Boolean(start&&Number.isFinite(startMs)),branchName:branchName(),mode:'FULL_AUTO_WALLET_EVENTS',reviewAt:'ACCURATE'};
+ return {enabled:autoEnabled(),postingEnabled:postingEnabled(),productionArmed:productionArmed(),startAt:start||null,startAtValid:Boolean(start&&Number.isFinite(startMs)),branchName:branchName(),mode:'FULL_AUTO_WALLET_EVENTS',reviewAt:'ACCURATE',duplicateGuard:true,readBackGuard:true};
 }
 
 function mapWalletTransaction(tx){
@@ -69,7 +71,7 @@ function makeAutoJob(tx,mapped){
  const totalDebit=mapped.entries.reduce((s,x)=>s+money(x.debit),0),totalCredit=mapped.entries.reduce((s,x)=>s+money(x.credit),0);
  const description=clean(`AUTO ${mapped.type} • ${tx.partnerId} • ${tx.reference||tx.transactionId}`,250);
  const journalDraft={documentType:'JOURNAL_VOUCHER',source:'LIBRA_AUTO_WALLET_EVENT',statementNo:clean(tx.reference||tx.transactionId,120),partnerId:tx.partnerId,period:`AUTO-${date.isoMonth}`,transactionDate:tx.createdAt,branchName:branchName(),description,entries:mapped.entries,totalDebit,totalCredit,balanced:totalDebit===totalCredit&&totalDebit>0,mappingReady:mapped.entries.every(x=>Boolean(x.accountNo))};
- return {hash,job:{jobId,status:'APPROVAL_PENDING',partnerId:tx.partnerId,month:`AUTO-${date.isoMonth}`,statementNo:clean(tx.reference||tx.transactionId,120),statementHash:hash,journalNumber,journalDraft,createdAt:now(),createdBy:'SYSTEM_AUTO',updatedAt:now(),lastError:null,postedAt:null,accurateReference:null,accurateId:null,approvalRequestId,duplicate:false,autoEvent:true,autoSource:tx.source,walletTransactionId:tx.transactionId,accountantReviewAt:'ACCURATE'}};
+ return {hash,job:{jobId,status:'APPROVAL_PENDING',partnerId:tx.partnerId,month:`AUTO-${date.isoMonth}`,statementNo:clean(tx.reference||tx.transactionId,120),statementHash:hash,journalNumber,journalDraft,createdAt:now(),createdBy:'SYSTEM_AUTO',updatedAt:now(),lastError:null,postedAt:null,accurateReference:null,accurateId:null,approvalRequestId,duplicate:false,autoEvent:true,autoSource:tx.source,walletTransactionId:tx.transactionId,accountantReviewAt:'ACCURATE',duplicateGuard:true,readBackGuard:true}};
 }
 
 async function loadMarker(transactionId){return syncStore().get(markerKey(transactionId),{type:'json',consistency:'strong'});}
@@ -87,17 +89,102 @@ async function ensureAutoJob(tx,mapped){
  const existing=await syncStore().get(key,{type:'json',consistency:'strong'});if(!existing)throw new Error('Auto job sedang dibuat proses lain.');if(!existing.autoEvent||existing.walletTransactionId!==tx.transactionId)throw new Error('Collision pada Accurate auto job. Posting dihentikan.');return existing;
 }
 
+function normalizeDate(value){
+ const raw=clean(value,50);if(!raw)return '';
+ if(/^\d{2}\/\d{2}\/20\d{2}$/.test(raw))return raw;
+ const d=new Date(raw);if(!Number.isFinite(d.getTime()))return raw;
+ return new Intl.DateTimeFormat('en-GB',{timeZone:'Asia/Jayapura',day:'2-digit',month:'2-digit',year:'numeric'}).format(d);
+}
+
+function expectedLines(payload){
+ return (payload?.detailJournalVoucher||[]).map(line=>`${clean(line.accountNo,80)}|${String(line.amountType||'').toUpperCase()}|${Math.abs(money(line.amount))}`).sort();
+}
+
+function detailLines(detail){
+ const source=Array.isArray(detail?.detailJournalVoucher)?detail.detailJournalVoucher:Array.isArray(detail?.detailJournal)?detail.detailJournal:Array.isArray(detail?.details)?detail.details:[];
+ const rows=[];
+ for(const line of source){
+  const accountNo=clean(line?.accountNo||line?.glAccountNo||line?.account?.no||line?.glAccount?.no,80);if(!accountNo)continue;
+  const amount=Math.abs(money(line?.amount)),type=String(line?.amountType||'').trim().toUpperCase();
+  if(amount>0&&(type==='DEBIT'||type==='CREDIT')){rows.push(`${accountNo}|${type}|${amount}`);continue;}
+  const debit=Math.abs(money(line?.debit??line?.debitAmount)),credit=Math.abs(money(line?.credit??line?.creditAmount));
+  if(debit>0)rows.push(`${accountNo}|DEBIT|${debit}`);if(credit>0)rows.push(`${accountNo}|CREDIT|${credit}`);
+ }
+ return rows.sort();
+}
+
+function verifyJournalDetail(detail,payload,expectedBranchId=null){
+ const actualNumber=clean(detail?.number||detail?.no,120),actualDate=normalizeDate(detail?.transDate||detail?.date),expectedDate=normalizeDate(payload?.transDate);
+ const actualBranch=clean(detail?.branchName||detail?.branch?.name||detail?.branch?.branchName,160),actualBranchId=detail?.branchId??detail?.branch?.id??null;
+ const expectedBranch=clean(payload?.branchName,160),branchOk=actualBranch?norm(actualBranch)===norm(expectedBranch):(expectedBranchId!==null&&expectedBranchId!==undefined&&actualBranchId!==null&&actualBranchId!==undefined?String(actualBranchId)===String(expectedBranchId):false);
+ const expected=expectedLines(payload),actual=detailLines(detail),linesReadable=actual.length>0,linesOk=linesReadable&&expected.length===actual.length&&expected.every((v,i)=>v===actual[i]);
+ const checks={number:actualNumber===clean(payload?.number,120),date:actualDate===expectedDate,branch:branchOk,lines:linesOk};
+ return {verified:Object.values(checks).every(Boolean),checks,actual:{number:actualNumber,date:actualDate,branchName:actualBranch||null,branchId:actualBranchId,lines},expected:{number:clean(payload?.number,120),date:expectedDate,branchName:expectedBranch,branchId:expectedBranchId,lines:expected}};
+}
+
+async function findJournalByNumber(accurate,number){
+ const {data}=await accurate.accurateGet('journal-voucher','list',{'sp.pageSize':20,'sp.page':1,'fields':'id,number','filter.number':clean(number,120)}),rows=Array.isArray(data?.d)?data.d:[];
+ const exact=rows.filter(row=>norm(row?.number||row?.no)===norm(number));
+ if(exact.length>1)throw new Error(`Duplicate guard: lebih dari satu Journal Voucher bernomor ${clean(number,120)} ditemukan di Accurate.`);
+ return exact[0]||null;
+}
+
+async function readJournalDetail(accurate,id){
+ if(id===null||id===undefined||id==='')return null;
+ const {data}=await accurate.accurateGet('journal-voucher','detail',{id});return data?.d&&typeof data.d==='object'?data.d:null;
+}
+
+async function lookupJournalVerification(accurate,payload,expectedBranchId=null,idHint=null){
+ let row=null,detail=null;
+ if(idHint!==null&&idHint!==undefined&&idHint!==''){
+  try{detail=await readJournalDetail(accurate,idHint);}catch{}
+ }
+ if(!detail){row=await findJournalByNumber(accurate,payload.number);if(!row)return {found:false,verified:false,row:null,detail:null,verification:null};detail=await readJournalDetail(accurate,row.id);}
+ if(!detail)return {found:Boolean(row||idHint),verified:false,row,detail:null,verification:null};
+ const verification=verifyJournalDetail(detail,payload,expectedBranchId);return {found:true,verified:verification.verified,row,detail,verification};
+}
+
+async function updateAutoJob(job,patch){
+ const key=autoJobKey(job.statementHash),entry=await syncStore().getWithMetadata(key,{type:'json',consistency:'strong'});if(!entry?.data)throw new Error('Auto job hilang saat update verification.');
+ const next={...entry.data,...patch,updatedAt:now()},write=await syncStore().setJSON(key,next,{onlyIfMatch:entry.etag});if(write.modified)return next;
+ const latest=await syncStore().get(key,{type:'json',consistency:'strong'});if(latest)return latest;throw new Error('Auto job berubah saat update verification.');
+}
+
+async function markExistingVerified(tx,job,lookup){
+ const verifiedAt=now(),detail=lookup.detail||{},next=await updateAutoJob(job,{status:'POSTED',postedAt:job.postedAt||verifiedAt,accurateReference:clean(detail?.number||detail?.no||job.journalNumber,120),accurateId:detail?.id??lookup.row?.id??job.accurateId??null,duplicate:true,duplicateFoundBeforePost:true,readBackVerified:true,readBackVerifiedAt:verifiedAt,readBackDigest:digest(lookup.verification),lastError:null});
+ return saveMarker(tx,'POSTED',{jobId:next.jobId,journalNumber:next.journalNumber,postedAt:next.postedAt,accurateId:next.accurateId??null,branchName:branchName(),duplicatePrevented:true,readBackVerified:true});
+}
+
+async function markReconcile(tx,job,reason,lookup=null){
+ const next=await updateAutoJob(job,{status:'RECONCILE_REQUIRED',readBackVerified:false,readBackCheckedAt:now(),readBackDigest:lookup?.verification?digest(lookup.verification):null,lastError:clean(reason,500),failedAt:now()});
+ return saveMarker(tx,'RECONCILE_REQUIRED',{jobId:next.jobId,journalNumber:next.journalNumber,reason:clean(reason,500),readBackVerified:false});
+}
+
 async function processTransaction(tx){
  const mapped=mapWalletTransaction(tx);if(!mapped.ok)return saveMarker(tx,'EXCEPTION',{reason:mapped.reason,unsupported:Boolean(mapped.unsupported)});
  let job=await ensureAutoJob(tx,mapped);
- if(job.status==='POSTED')return saveMarker(tx,'POSTED',{jobId:job.jobId,journalNumber:job.journalNumber,postedAt:job.postedAt,accurateId:job.accurateId??null});
+ if(job.status==='POSTED')return saveMarker(tx,'POSTED',{jobId:job.jobId,journalNumber:job.journalNumber,postedAt:job.postedAt,accurateId:job.accurateId??null,readBackVerified:Boolean(job.readBackVerified)});
  if(job.status==='RECONCILE_REQUIRED')return saveMarker(tx,'RECONCILE_REQUIRED',{jobId:job.jobId,journalNumber:job.journalNumber,reason:job.lastError||'Perlu reconcile.'});
  if(job.status==='POST_FAILED')return saveMarker(tx,'POST_FAILED',{jobId:job.jobId,journalNumber:job.journalNumber,reason:job.lastError||'Posting gagal.'});
  if(job.status!=='APPROVAL_PENDING')return saveMarker(tx,'EXCEPTION',{jobId:job.jobId,journalNumber:job.journalNumber,reason:`Status auto job ${job.status} tidak aman untuk auto-post.`});
- const accurate=await import('./_accurate-core.mjs');
+ const accurate=await import('./_accurate-core.mjs'),payload=accurate.buildAccurateJournalPayload(job);
  try{
+  const readiness=await accurate.verifyAccurateProductionReadiness();
+  const duplicate=await lookupJournalVerification(accurate,payload,readiness.branch.id,null);
+  if(duplicate.found){
+   if(duplicate.verified)return markExistingVerified(tx,job,duplicate);
+   return markReconcile(tx,job,`Duplicate guard: nomor ${job.journalNumber} sudah ada di Accurate tetapi isi/tanggal/cabang tidak identik. Tidak ada POST baru.`,duplicate);
+  }
   const posted=await accurate.postAccurateJob(job.jobId,'SYSTEM AUTO • review accountant in Accurate',job.approvalRequestId);
-  return saveMarker(tx,'POSTED',{jobId:posted.jobId,journalNumber:posted.journalNumber,postedAt:posted.postedAt,accurateId:posted.accurateId??null,branchName:posted.productionBranchName||branchName()});
+  let lookup;
+  try{
+   lookup=await lookupJournalVerification(accurate,payload,posted.productionBranchId??readiness.branch.id,posted.accurateId);
+   if(!lookup.found){await wait(250);lookup=await lookupJournalVerification(accurate,payload,posted.productionBranchId??readiness.branch.id,posted.accurateId);}
+  }catch(error){return markReconcile(tx,posted,`POST diterima tetapi read-back Accurate gagal: ${clean(error?.message||error,400)}`);}
+  if(!lookup.found)return markReconcile(tx,posted,`POST diterima tetapi Journal Voucher ${job.journalNumber} belum dapat dibaca kembali dari Accurate.`);
+  if(!lookup.verified)return markReconcile(tx,posted,`POST diterima tetapi read-back tidak identik untuk ${job.journalNumber}.`,lookup);
+  const verifiedAt=now(),verified=await updateAutoJob(posted,{status:'POSTED',readBackVerified:true,readBackVerifiedAt:verifiedAt,readBackDigest:digest(lookup.verification),accurateId:lookup.detail?.id??posted.accurateId??null,accurateReference:clean(lookup.detail?.number||lookup.detail?.no||posted.accurateReference||job.journalNumber,120),lastError:null});
+  return saveMarker(tx,'POSTED',{jobId:verified.jobId,journalNumber:verified.journalNumber,postedAt:verified.postedAt,accurateId:verified.accurateId??null,branchName:verified.productionBranchName||branchName(),readBackVerified:true});
  }catch(error){
   job=await accurate.getAccurateJob(job.jobId).catch(()=>job);
   if(job?.status==='RECONCILE_REQUIRED')return saveMarker(tx,'RECONCILE_REQUIRED',{jobId:job.jobId,journalNumber:job.journalNumber,reason:clean(job.lastError||error?.message||error,500)});
