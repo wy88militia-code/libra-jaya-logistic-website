@@ -19,6 +19,15 @@ export const PILOT_ROUTE_CODES=[
  'LM-DJJ-9111-02-2001',
 ];
 const PILOT_SET=new Set(PILOT_ROUTE_CODES);
+const MULTIMODAL_ROUTE_CODES=new Set(['LM-DJJ-9103-02-3003']);
+const FIXED_COORDINATES={
+ 'LM-DJJ-9171-03-1008':{
+  latitude:-2.614863433,
+  longitude:140.675555146,
+  address:'Kelurahan Awiyo, Distrik Abepura, Kota Jayapura, Papua, Indonesia',
+  source:'DPMPTSP Kota Jayapura + Google Routes API',
+ },
+};
 
 function config(){return {
  sheetId:clean(process.env.MASTER_SHEET_ID)||DEFAULT_SHEET_ID,
@@ -67,6 +76,11 @@ async function driveRoute(latitude,longitude){
 
 async function geocode(row){
  const key=config().mapsKey;if(key.length<20)throw new Error('GOOGLE_MAPS_SERVER_API_KEY belum dikonfigurasi.');
+ const fixed=FIXED_COORDINATES[row.kodeRute];
+ if(fixed){
+  let route=null,routeError='';try{route=await driveRoute(fixed.latitude,fixed.longitude);}catch(e){routeError=clean(e.message)||'Routes gagal';}
+  return {...row,ok:true,latitude:fixed.latitude,longitude:fixed.longitude,address:fixed.address,source:fixed.source,status:`MANUAL PASS - TITIK KELURAHAN${route?' | ROUTES PASS':' | ROUTES GAGAL'}`,score:99,route,routeError};
+ }
  const query=row.query||[row.kelurahan,`Distrik ${row.distrik}`,row.kabupatenKota,row.provinsi,'Indonesia'].filter(Boolean).join(', ');
  const url=new URL('https://maps.googleapis.com/maps/api/geocode/json');url.searchParams.set('address',query);url.searchParams.set('language','id');url.searchParams.set('region','id');url.searchParams.set('key',key);
  const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),10000);
@@ -76,8 +90,9 @@ async function geocode(row){
   const lat=Number(best.r.geometry?.location?.lat),lng=Number(best.r.geometry?.location?.lng);if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Koordinat Google tidak valid.');
   if(best.score<4)throw new Error(`LOW CONFIDENCE (${best.score}) — ${best.r.formatted_address||query}`);
   const locationType=clean(best.r.geometry?.location_type)||'UNKNOWN';const partial=best.r.partial_match?'PARTIAL MATCH':'MATCH';
+  if(MULTIMODAL_ROUTE_CODES.has(row.kodeRute))return {...row,ok:true,multimodal:true,latitude:lat,longitude:lng,address:clean(best.r.formatted_address),source:'Google Maps Geocoding API + aturan multimoda',status:`GOOGLE API PASS - ${partial} - ${locationType} | MULTIMODA DANAU`,score:best.score,route:null,routeError:'Drive route tidak berlaku; lanjut boat dari Khalkote.'};
   let route=null,routeError='';try{route=await driveRoute(lat,lng);}catch(e){routeError=clean(e.message)||'Routes gagal';}
-  return {...row,ok:true,latitude:lat,longitude:lng,address:clean(best.r.formatted_address),status:`GOOGLE API PASS - ${partial} - ${locationType}${route?' | ROUTES PASS':' | ROUTES GAGAL'}`,score:best.score,route,routeError};
+  return {...row,ok:true,latitude:lat,longitude:lng,address:clean(best.r.formatted_address),source:'Google Maps Geocoding API + Routes API',status:`GOOGLE API PASS - ${partial} - ${locationType}${route?' | ROUTES PASS':' | ROUTES GAGAL'}`,score:best.score,route,routeError};
  }finally{clearTimeout(timer);}
 }
 
@@ -92,8 +107,9 @@ async function writeResults(token,results){
  const c=config(),date=witDate(),data=[];
  for(const r of results){
   if(r.ok){
-   data.push({range:`'${SHEET_NAME}'!AE${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[[r.latitude,r.longitude,'Google Maps Geocoding API + Routes API',r.status,date,r.address]]});
-   if(r.route)data.push({range:`'${SHEET_NAME}'!K${r.rowNumber}:L${r.rowNumber}`,majorDimension:'ROWS',values:[[Number(r.route.distanceKm.toFixed(1)),r.route.duration]]});
+   data.push({range:`'${SHEET_NAME}'!AE${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[[r.latitude,r.longitude,r.source||'Google Maps Geocoding API + Routes API',r.status,date,r.address]]});
+   if(r.multimodal)data.push({range:`'${SHEET_NAME}'!K${r.rowNumber}:L${r.rowNumber}`,majorDimension:'ROWS',values:[['','']]});
+   else if(r.route)data.push({range:`'${SHEET_NAME}'!K${r.rowNumber}:L${r.rowNumber}`,majorDimension:'ROWS',values:[[Number(r.route.distanceKm.toFixed(1)),r.route.duration]]});
   }else data.push({range:`'${SHEET_NAME}'!AG${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[['Google Maps Geocoding API',`GOOGLE API GAGAL - ${clean(r.error).slice(0,180)}`,date,'']]});
  }
  if(!data.length)return;
