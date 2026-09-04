@@ -32,11 +32,16 @@ function legacyRate(route){
   const ratePerKg=num(raw.ratePerKg);if(ratePerKg<=0)return null;
   return {ruleId:'LEGACY',matchType:'LEGACY',matchValue:route.kodeRute||route.zonaTarif||'DEFAULT',ratePerKg,minimumChargeKg:Math.max(0,num(raw.minimumChargeKg)),fixedFee:Math.max(0,num(raw.fixedFee)),handlingFee:Math.max(0,num(raw.handlingFee)),surchargePct:Math.max(0,num(raw.surchargePct)),cutoffWit:normalizeCutoff(raw.cutoffWit),active:true};
 }
+function autoMasterRate(route={}){
+  if(route.coverageStatus!=='ACTIVE'||route.requiresOperationalConfirmation)return null;
+  const ratePerKg=Math.round(num(route.tarifRekomKg));if(ratePerKg<=0)return null;
+  return {ruleId:`AUTO:${route.kodeRute||route.kodeWilayah||'ROUTE'}`,matchType:'AUTO_MASTER',matchValue:route.kodeRute||route.kodeWilayah||'',ratePerKg,minimumChargeKg:Math.max(0,num(route.minimumChargeableKg,10)),fixedFee:0,handlingFee:0,surchargePct:0,cutoffWit:normalizeCutoff(route.cutoffWit),active:true,minimumLoadKg:Math.max(0,num(route.minimumLoadKg)),costPerKgMinLoad:Math.max(0,num(route.costPerKgMinLoad)),grossMarginMinLoad:num(route.grossMarginMinLoad),fullCostTrip:Math.max(0,num(route.fullCostTrip)),source:'MODAL_RUTE_PILOT'};
+}
 
 export async function getRatePlan(partnerId){const id=normalizePartnerId(partnerId);if(!id)return null;return store().get(`partner/${id}`,{type:'json',consistency:'strong'});}
 export async function listRatePlans(){const {blobs}=await store().list({prefix:'partner/'});const rows=[];for(const blob of blobs){const row=await store().get(blob.key,{type:'json'});if(row)rows.push(row);}return rows.sort((a,b)=>String(a.partnerId).localeCompare(String(b.partnerId)));}
 export async function ensureApiPartnerRatePlan(partnerId,companyName='',adminUser='system'){
-  const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');const existing=await getRatePlan(id);if(existing)return existing;const stamp=now();const plan={partnerId:id,planName:text(`API ${companyName||id}`),status:'INACTIVE',currency:'IDR',rules:[],createdAt:stamp,updatedAt:stamp,updatedBy:text(adminUser,80),note:'Placeholder onboarding API. Aktifkan setelah harga jual partner dikonfigurasi.'};await store().setJSON(`partner/${id}`,plan,{onlyIfNew:true});return plan;
+  const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');const existing=await getRatePlan(id);if(existing)return existing;const stamp=now();const plan={partnerId:id,planName:text(`API ${companyName||id}`),status:'INACTIVE',currency:'IDR',rules:[],createdAt:stamp,updatedAt:stamp,updatedBy:text(adminUser,80),note:'Placeholder onboarding API. Jika belum ada override partner, harga otomatis mengikuti Modal Rute Pilot yang sudah terverifikasi.'};await store().setJSON(`partner/${id}`,plan,{onlyIfNew:true});return plan;
 }
 export async function upsertRateRule(partnerId,input={},adminUser='admin'){
   const id=normalizePartnerId(partnerId);if(!id)throw new Error('Partner ID tidak valid.');if(!await getPartner(id))throw new Error('Partner belum terdaftar.');const current=await getRatePlan(id);const rule=normalizeRule(input);const rules=[...(current?.rules||[])].filter(row=>row.ruleId!==rule.ruleId);rules.push(rule);rules.sort((a,b)=>a.matchType.localeCompare(b.matchType)||a.matchValue.localeCompare(b.matchValue));
@@ -50,21 +55,20 @@ export async function setRatePlanStatus(partnerId,status,adminUser='admin'){
 }
 
 export async function resolvePartnerRate(partnerId,route={}){
-  const plan=await getRatePlan(partnerId);
-  if(plan){
-    if(plan.status!=='ACTIVE')return {rate:null,source:'RATE_PLAN_INACTIVE',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status,cutoffWit:normalizeCutoff()};
-    const rules=(plan.rules||[]).filter(row=>row.active!==false);const routeCode=upper(route.kodeRute);const zone=upper(route.zonaTarif);
+  const plan=await getRatePlan(partnerId),automatic=autoMasterRate(route);
+  if(plan&&plan.status==='ACTIVE'){
+    const rules=(plan.rules||[]).filter(row=>row.active!==false),routeCode=upper(route.kodeRute),zone=upper(route.zonaTarif);
     const rule=rules.find(row=>row.matchType==='ROUTE'&&row.matchValue===routeCode)||rules.find(row=>row.matchType==='ZONE'&&row.matchValue===zone)||rules.find(row=>row.matchType==='DEFAULT');
     if(rule)return {rate:rule,source:'PARTNER_RATE_PLAN',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status};
-    return {rate:null,source:'PARTNER_RATE_PLAN_NO_MATCH',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status,cutoffWit:normalizeCutoff()};
   }
-  const partner=await getPartner(partnerId);if(partner?.onboardingApplicationId)return {rate:null,source:'API_PARTNER_RATE_PLAN_REQUIRED',planId:null,planName:null,planStatus:null,cutoffWit:normalizeCutoff()};
+  if(automatic)return {rate:automatic,source:'MASTER_PILOT_AUTO_RATE',planId:plan?.partnerId||null,planName:plan?.planName||'Auto Master Pilot',planStatus:plan?.status||'AUTO'};
+  if(plan)return {rate:null,source:plan.status==='ACTIVE'?'PARTNER_RATE_PLAN_NO_MATCH':'RATE_PLAN_INACTIVE',planId:plan.partnerId,planName:plan.planName,planStatus:plan.status,cutoffWit:normalizeCutoff()};
   const legacy=legacyRate(route);if(legacy)return {rate:legacy,source:'LEGACY_RATE_TABLE',planId:null,planName:'Legacy Rate Table',planStatus:'ACTIVE'};
   return {rate:null,source:'NO_RATE_PLAN',planId:null,planName:null,planStatus:null,cutoffWit:normalizeCutoff()};
 }
 
 export function calculateRateAmount(rate,weightKg){
   if(!rate)return null;const weight=num(weightKg);if(weight<=0)return null;const chargeableKg=Math.max(weight,num(rate.minimumChargeKg));const baseAmount=Math.round(chargeableKg*num(rate.ratePerKg));const surchargeAmount=Math.round(baseAmount*num(rate.surchargePct)/100);const fixedFee=Math.round(num(rate.fixedFee));const handlingFee=Math.round(num(rate.handlingFee));const totalAmount=baseAmount+surchargeAmount+fixedFee+handlingFee;
-  if(totalAmount<=0)return null;return {totalAmount,chargeableKg,actualWeightKg:weight,ratePerKg:num(rate.ratePerKg),minimumChargeKg:num(rate.minimumChargeKg),baseAmount,surchargePct:num(rate.surchargePct),surchargeAmount,fixedFee,handlingFee,cutoffWit:normalizeCutoff(rate.cutoffWit)};
+  if(totalAmount<=0)return null;return {totalAmount,chargeableKg,actualWeightKg:weight,ratePerKg:num(rate.ratePerKg),minimumChargeKg:num(rate.minimumChargeKg),minimumLoadKg:num(rate.minimumLoadKg),baseAmount,surchargePct:num(rate.surchargePct),surchargeAmount,fixedFee,handlingFee,totalAmount,cutoffWit:normalizeCutoff(rate.cutoffWit)};
 }
 export function defaultCutoffWit(){return normalizeCutoff();}
