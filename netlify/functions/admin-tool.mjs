@@ -12,6 +12,7 @@ import { ticketSummary } from './_ticket-core.mjs';
 import { listIncidentEvents } from './_tracking-core.mjs';
 
 const cards=[
+ ['Go-Live Readiness','Kontrol final sebelum transaksi nyata: credential presence, master/rate/vendor snapshot, Xendit, Accurate, backup, alert dan privacy guard.','/admin-go-live','Buka Go-Live'],
  ['Partner & Deposit','Daftar partner, saldo dan pengajuan koreksi saldo maker-checker.','/admin-partners','Buka Partner'],
  ['Approval Center','Maker-checker untuk saldo, billing, rate aktif, reaktivasi API, go-live dan disaster recovery.','/admin-approvals','Buka Approval'],
  ['Finance & Billing','Statement partner, debit/credit note, settlement klaim, aging dan Accurate queue.','/admin-finance-billing','Buka Finance'],
