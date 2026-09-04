@@ -4,7 +4,7 @@ import { assertAdminPermission } from './_admin-rbac-core.mjs';
 import { getAdminSession } from './_partner-core.mjs';
 
 const clean=(v,n=300)=>String(v??'').trim().slice(0,n);
-const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
 const dbName=db=>clean(db?.alias||db?.name||db?.databaseName||db?.companyName||'',160);
 const stamp=v=>{try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Jayapura'}).format(new Date(v))+' WIT';}catch{return v||'—';}};
 const rp=v=>`Rp${Math.trunc(Number(v)||0).toLocaleString('id-ID')}`;
