@@ -27,6 +27,7 @@ const cards=[
  ['Notification & Webhook','Notifikasi operasional, retry dan replay webhook.','/admin-webhook-control','Buka Control Center'],
  ['API Security & Health','Emergency suspend, IP allowlist, quota, anomaly dan health Production API.','/admin-api-security','Buka Security'],
  ['Audit, Backup & DR','Audit tamper-evident, backup, retention dan disaster recovery maker-checker.','/admin-audit-backup','Buka Audit & Backup'],
+ ['Privacy & Device Security','Device-bound admin/courier session, pseudonymous logging, retention dry-run dan protected stores.','/admin-privacy-security','Buka Privacy'],
  ['Resilience & Alerts','Off-site encrypted backup serta email/WhatsApp alert.','/admin-resilience','Buka Resilience'],
  ['Tracking & POD','Kurir update status, GPS, foto penerima dan POD.','/admin-courier','Buka Tracking'],
  ['Klaim & Insiden','Barang tertahan/rusak dan klaim ke logistik pengirim.','/admin-claims','Buka Klaim'],

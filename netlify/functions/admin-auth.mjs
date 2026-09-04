@@ -2,7 +2,9 @@ import crypto from 'node:crypto';
 import { normalizeAdminRole } from './_admin-rbac-core.mjs';
 
 const COOKIE_NAME='libra_admin_session';
+const DEVICE_COOKIE='libra_admin_device';
 const SESSION_SECONDS=30*60;
+const DEVICE_SECONDS=30*24*60*60;
 function safeEqual(left,right){const a=Buffer.from(String(left??''));const b=Buffer.from(String(right??''));return a.length===b.length&&crypto.timingSafeEqual(a,b);}
 function sign(value,secret){return crypto.createHmac('sha256',secret).update(value).digest('base64url');}
 function parseUsers(){try{const users=JSON.parse(process.env.ADMIN_USERS_JSON||'[]');return Array.isArray(users)?users:[];}catch{return [];}}
@@ -10,6 +12,7 @@ function verifyHashedPin(pin,user){if(!user?.pinSalt||!user?.pinHash)return fals
 function base32(secret){const alphabet='ABCDEFGHIJKLMNOPQRSTUVWXYZ234567';let bits='';for(const char of String(secret||'').toUpperCase().replace(/[^A-Z2-7]/g,'')){const value=alphabet.indexOf(char);if(value<0)continue;bits+=value.toString(2).padStart(5,'0');}const bytes=[];for(let i=0;i+8<=bits.length;i+=8)bytes.push(parseInt(bits.slice(i,i+8),2));return Buffer.from(bytes);}
 function totpCode(secret,counter){const key=base32(secret);if(!key.length)return '';const buf=Buffer.alloc(8);buf.writeBigUInt64BE(BigInt(counter));const digest=crypto.createHmac('sha1',key).update(buf).digest();const offset=digest[digest.length-1]&15;const code=(digest.readUInt32BE(offset)&0x7fffffff)%1000000;return String(code).padStart(6,'0');}
 function verifyTotp(code,secret){const clean=String(code||'').replace(/\D/g,'');if(!/^\d{6}$/.test(clean)||!secret)return false;const counter=Math.floor(Date.now()/30000);return [-1,0,1].some(delta=>safeEqual(clean,totpCode(secret,counter+delta)));}
+function issueDevice(secret){const deviceId=crypto.randomBytes(24).toString('base64url'),expires=Math.floor(Date.now()/1000)+DEVICE_SECONDS;const payload=Buffer.from(JSON.stringify({v:1,deviceId,expires})).toString('base64url');return {deviceId,token:`${payload}.${sign(payload,secret)}`};}
 
 export default async request=>{
  if(request.method!=='POST')return Response.json({message:'Metode tidak diizinkan.'},{status:405});const sessionSecret=process.env.ADMIN_SESSION_SECRET;if(!sessionSecret||sessionSecret.length<32)return Response.json({message:'Pengamanan admin belum dikonfigurasi.'},{status:503});
@@ -20,8 +23,8 @@ export default async request=>{
  else{const configuredPin=process.env.ADMIN_PIN;if(configuredPin&&safeEqual(body?.pin??'',configuredPin)){const secret=process.env.ADMIN_TOTP_SECRET;if(secret){otpVerified=verifyTotp(body?.otp,secret);valid=otpVerified;}else valid=true;username=String(body?.username||'legacy-admin').trim().slice(0,80)||'legacy-admin';role='SUPERADMIN';}}
  if(!valid){await new Promise(resolve=>setTimeout(resolve,700));return Response.json({message:'Username, PIN, atau OTP salah. Akses ditolak.'},{status:401});}
  if(portal==='courier'&&!['COURIER','OPS','SUPERADMIN'].includes(role))return Response.json({message:'Akun ini tidak memiliki akses Portal Kurir.'},{status:403});
- const expires=Math.floor(Date.now()/1000)+SESSION_SECONDS;const payload=Buffer.from(JSON.stringify({username,role,otp:otpVerified,expires,nonce:crypto.randomBytes(16).toString('hex')})).toString('base64url');const token=`${payload}.${sign(payload,sessionSecret)}`;
- const redirect=portal==='courier'?'/courier':'/libra-admin';
- return Response.json({ok:true,redirect,username,role},{status:200,headers:{'set-cookie':`${COOKIE_NAME}=${token}; Max-Age=${SESSION_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`,'cache-control':'no-store'}});
+ const device=issueDevice(sessionSecret),expires=Math.floor(Date.now()/1000)+SESSION_SECONDS;const payload=Buffer.from(JSON.stringify({v:2,username,role,otp:otpVerified,deviceId:device.deviceId,expires,nonce:crypto.randomBytes(16).toString('hex')})).toString('base64url');const token=`${payload}.${sign(payload,sessionSecret)}`;const redirect=portal==='courier'?'/courier':'/libra-admin';
+ const headers=new Headers({'content-type':'application/json; charset=utf-8','cache-control':'no-store'});headers.append('set-cookie',`${COOKIE_NAME}=${token}; Max-Age=${SESSION_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`);headers.append('set-cookie',`${DEVICE_COOKIE}=${device.token}; Max-Age=${DEVICE_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`);
+ return new Response(JSON.stringify({ok:true,redirect,username,role,deviceBound:true}),{status:200,headers});
 };
 export const config={path:'/.netlify/functions/admin-auth',method:'POST',rateLimit:{windowSize:300,windowLimit:5,aggregateBy:'ip',action:'rate_limit'}};
