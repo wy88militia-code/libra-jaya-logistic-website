@@ -20,14 +20,15 @@ export async function testMapsConnection(){
  const key=clean(process.env.GOOGLE_MAPS_SERVER_API_KEY);if(key.length<20)throw new Error('GOOGLE_MAPS_SERVER_API_KEY belum dikonfigurasi.');
  const origin={latitude:-2.576953,longitude:140.516372};
  const destination={latitude:-2.53371,longitude:140.71813};
- const geocodeUrl=new URL('https://maps.googleapis.com/maps/api/geocode/json');
- geocodeUrl.searchParams.set('latlng',`${origin.latitude},${origin.longitude}`);geocodeUrl.searchParams.set('language','id');geocodeUrl.searchParams.set('key',key);
- const [geocode,routes]=await Promise.all([
-  googleJson(geocodeUrl),
+ const geocodeUrl=point=>{const url=new URL('https://maps.googleapis.com/maps/api/geocode/json');url.searchParams.set('latlng',`${point.latitude},${point.longitude}`);url.searchParams.set('language','id');url.searchParams.set('key',key);return url;};
+ const [originGeocode,destinationGeocode,routes]=await Promise.all([
+  googleJson(geocodeUrl(origin)),
+  googleJson(geocodeUrl(destination)),
   googleJson('https://routes.googleapis.com/directions/v2:computeRoutes',{method:'POST',headers:{'content-type':'application/json','x-goog-api-key':key,'x-goog-fieldmask':'routes.distanceMeters,routes.duration'},body:JSON.stringify({origin:{location:{latLng:origin}},destination:{location:{latLng:destination}},travelMode:'DRIVE',routingPreference:'TRAFFIC_UNAWARE',languageCode:'id-ID',units:'METRIC'})})
  ]);
- if(geocode.status!=='OK'||!geocode.results?.length)throw new Error(`Geocoding API: ${geocode.status||'tidak ada hasil'}`);
+ if(originGeocode.status!=='OK'||!originGeocode.results?.length)throw new Error(`Geocoding titik awal: ${originGeocode.status||'tidak ada hasil'}`);
+ if(destinationGeocode.status!=='OK'||!destinationGeocode.results?.length)throw new Error(`Geocoding titik tujuan: ${destinationGeocode.status||'tidak ada hasil'}`);
  if(!routes.routes?.length)throw new Error('Routes API tidak mengembalikan rute uji.');
  const route=routes.routes[0];
- return {testedAt:new Date().toISOString(),geocoding:{status:'PASS',address:geocode.results[0].formatted_address},routes:{status:'PASS',distanceMeters:route.distanceMeters,duration:route.duration},testRoute:'Bandara Sentani → Jayapura'};
+ return {testedAt:new Date().toISOString(),geocoding:{status:'PASS',origin:{...origin,address:originGeocode.results[0].formatted_address},destination:{...destination,address:destinationGeocode.results[0].formatted_address}},routes:{status:'PASS',distanceMeters:route.distanceMeters,duration:route.duration},testRoute:'Bandara Sentani → titik uji Kota Jayapura'};
 }
