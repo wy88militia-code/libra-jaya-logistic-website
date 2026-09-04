@@ -21,7 +21,23 @@ export async function resolveAccurateConnection(){const mode=authMode();if(mode=
 function headersFor(connection,contentType=null){const headers=connection.mode==='API_TOKEN'?apiTokenHeaders():{authorization:`Bearer ${String(process.env.ACCURATE_ACCESS_TOKEN||'').trim()}`,'x-session-id':connection.session};if(contentType)headers['content-type']=contentType;return headers;}
 export async function accurateGet(resource,action='list',params={}){const connection=await resolveAccurateConnection();const url=new URL(`${connection.host}/accurate/api/${clean(resource,80)}/${clean(action,40)}.do`);for(const [k,v] of Object.entries(params||{}))if(v!==null&&v!==undefined&&v!=='')url.searchParams.set(k,String(v));const response=await fetch(url,{method:'GET',headers:headersFor(connection),redirect:'follow'});const data=await safeJson(response);if(!response.ok||data?.s===false)throw new Error(`Accurate ${resource}/${action} gagal: ${clean(data?.d?.join?.(' ')||data?.message||response.status,500)}`);return {connection,data};}
 export async function testAccurateConnection(){const connection=await resolveAccurateConnection();let accountProbe=null;try{const result=await accurateGet('glaccount','list',{'sp.pageSize':1,'fields':'id,no,name'});accountProbe=Array.isArray(result.data?.d)?result.data.d[0]||null:null;}catch(error){accountProbe={error:clean(error?.message||error,300)};}return {ok:true,mode:connection.mode,host:connection.host,database:connection.database||null,accountProbe,testedAt:now()};}
-export async function validateAccurateAccountMap(){const config=accurateConfigStatus();if(!config.configured)return {ok:false,message:'Koneksi Accurate belum dikonfigurasi.',mapped:[]};const {data}=await accurateGet('glaccount','list',{'sp.pageSize':200,'fields':'id,no,name,accountType'});const rows=Array.isArray(data?.d)?data.d:[];const byNo=new Map(rows.map(row=>[String(row.no||''),row]));const mapped=Object.entries(config.accountMap).filter(([,no])=>no).map(([role,no])=>({role,no,found:byNo.has(no),name:byNo.get(no)?.name||null,id:byNo.get(no)?.id||null}));return {ok:mapped.length>=4&&mapped.every(x=>x.found),mapped,totalAccountsRead:rows.length};}
+export async function validateAccurateAccountMap(){
+ const config=accurateConfigStatus();
+ if(!config.configured)return {ok:false,message:'Koneksi Accurate belum dikonfigurasi.',mapped:[]};
+ const rows=[];
+ let page=1,pageCount=1;
+ do{
+  const {data}=await accurateGet('glaccount','list',{'sp.pageSize':100,'sp.page':page,'fields':'id,no,name,accountType'});
+  const batch=Array.isArray(data?.d)?data.d:[];
+  rows.push(...batch);
+  const reported=Number(data?.sp?.pageCount)||1;
+  pageCount=Math.max(1,Math.min(reported,100));
+  page+=1;
+ }while(page<=pageCount);
+ const byNo=new Map(rows.map(row=>[String(row.no||'').trim(),row]));
+ const mapped=Object.entries(config.accountMap).filter(([,no])=>no).map(([role,no])=>({role,no,found:byNo.has(String(no).trim()),name:byNo.get(String(no).trim())?.name||null,id:byNo.get(String(no).trim())?.id||null}));
+ return {ok:mapped.length>=4&&mapped.every(x=>x.found),mapped,totalAccountsRead:rows.length,pagesRead:pageCount};
+}
 
 function journalEntries(report){const map=accountMap();const entries=[];const service=money(report.summary?.serviceCharge);if(service>0){entries.push({role:'CUSTOMER_DEPOSIT',accountNo:map.customerDeposit,debit:service,credit:0,memo:`Settlement deposit ${report.period.month}`});entries.push({role:'SERVICE_REVENUE',accountNo:map.serviceRevenue,debit:0,credit:service,memo:`Pendapatan jasa logistik ${report.period.month}`});}
  for(const line of report.lines||[]){if(line.type==='SERVICE')continue;const amount=money(line.amount);if(!amount)continue;if(amount>0){entries.push({role:'CUSTOMER_DEPOSIT',accountNo:map.customerDeposit,debit:amount,credit:0,memo:line.description});entries.push({role:'SERVICE_REVENUE',accountNo:map.serviceRevenue,debit:0,credit:amount,memo:line.description});}else{const value=Math.abs(amount);const expenseRole=line.type==='CLAIM_SETTLEMENT'?'CLAIM_EXPENSE':'ADJUSTMENT_EXPENSE';const expenseAccount=expenseRole==='CLAIM_EXPENSE'?map.claimExpense:map.adjustmentExpense;entries.push({role:expenseRole,accountNo:expenseAccount,debit:value,credit:0,memo:line.description});entries.push({role:'CUSTOMER_DEPOSIT',accountNo:map.customerDeposit,debit:0,credit:value,memo:line.description});}}
