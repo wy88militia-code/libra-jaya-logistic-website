@@ -1,5 +1,5 @@
 import { requirePartnerSession } from './_partner-core.mjs';
-import { addTicketMessage, createPartnerTicket, getTicket, listPartnerTickets, listTicketEvents, ticketSla, TICKET_CATEGORIES } from './_ticket-core.mjs';
+import { addTicketMessage, createPartnerTicket, getTicket, listPartnerTickets, listTicketEvents, ticketSla, TICKET_CATEGORIES, updateTicketAdmin } from './_ticket-core.mjs';
 
 const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
 function sameOrigin(request){const origin=request.headers.get('origin');if(!origin)return true;try{return new URL(origin).origin===new URL(request.url).origin;}catch{return false;}}
@@ -10,7 +10,7 @@ export default async request=>{
  if(request.method==='POST'){
   if(!sameOrigin(request))return new Response('Forbidden',{status:403});const form=await request.formData(),action=String(form.get('action')||'');try{
    if(action==='create'){const ticket=await createPartnerTicket({category:form.get('category'),bookingId:form.get('bookingId'),subject:form.get('subject'),body:form.get('body')},partner);selectedId=ticket.ticketId;message=`Ticket ${ticket.ticketId} berhasil dibuat.`;}
-   else if(action==='reply'){const ticketId=String(form.get('ticketId')||''),ticket=await getTicket(ticketId);if(!ticket||ticket.partnerId!==partner.partnerId)throw new Error('Tiket tidak ditemukan.');await addTicketMessage(ticketId,{message:form.get('message')},{type:'PARTNER',id:`partner:${partner.partnerId}`,partnerId:partner.partnerId});selectedId=ticketId;message='Balasan dikirim ke Customer Service Libra.';}
+   else if(action==='reply'){const ticketId=String(form.get('ticketId')||''),ticket=await getTicket(ticketId);if(!ticket||ticket.partnerId!==partner.partnerId)throw new Error('Tiket tidak ditemukan.');await addTicketMessage(ticketId,{message:form.get('message')},{type:'PARTNER',id:`partner:${partner.partnerId}`,partnerId:partner.partnerId});if(ticket.status==='WAITING_PARTNER')await updateTicketAdmin(ticketId,{status:'IN_PROGRESS'},`partner:${partner.partnerId}`);selectedId=ticketId;message='Balasan dikirim ke Customer Service Libra.';}
    else throw new Error('Aksi tidak dikenal.');
   }catch(e){error=e?.message||'Gagal memproses ticket.';}
  }else if(request.method!=='GET')return new Response('Method not allowed',{status:405});
