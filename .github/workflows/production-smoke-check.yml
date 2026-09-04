@@ -1,0 +1,52 @@
+name: Production Smoke Check
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: production-smoke-main
+  cancel-in-progress: true
+
+jobs:
+  verify-production:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - name: Wait for Netlify production release
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+          RELEASE_URL: https://librajayalogistic.com/health/release
+        run: |
+          set -u
+          echo "Waiting for Netlify production commit: ${EXPECTED_SHA}"
+          for attempt in $(seq 1 48); do
+            body="$(curl -fsS --max-time 15 "${RELEASE_URL}" 2>/dev/null || true)"
+            deployed_sha="$(printf '%s' "${body}" | jq -r '.commitRef // empty' 2>/dev/null || true)"
+            release_version="$(printf '%s' "${body}" | jq -r '.releaseVersion // empty' 2>/dev/null || true)"
+            echo "Attempt ${attempt}/48 • deployed=${deployed_sha:-unavailable} • release=${release_version:-unavailable}"
+            if [ "${deployed_sha}" = "${EXPECTED_SHA}" ]; then
+              echo "Production is running the expected commit."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Production did not reach expected commit within 8 minutes."
+          exit 1
+
+      - name: Smoke test protected admin panels
+        shell: bash
+        run: |
+          set -euo pipefail
+          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation; do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://librajayalogistic.com${path}")"
+            echo "${path} -> HTTP ${code}"
+            case "${code}" in
+              200|301|302|303|307|308) ;;
+              *) echo "Unexpected HTTP status for ${path}"; exit 1 ;;
+            esac
+          done
