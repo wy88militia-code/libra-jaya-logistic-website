@@ -8,7 +8,7 @@ const jobs=()=>getStore(JOB_STORE);
 const approvals=()=>getStore(APPROVAL_STORE);
 const now=()=>new Date().toISOString();
 const clean=(v,n=500)=>String(v??'').trim().slice(0,n);
-const enabled=()=>String(process.env.ACCURATE_UAT_WRITE_ENABLED||'').trim().toLowerCase()==='true';
+const enabled=()=>String(process.env.ACCURATE_UAT_WRITE_ENABLED??'true').trim().toLowerCase()!=='false';
 const productionEnabled=()=>String(process.env.ACCURATE_POSTING_ENABLED||'').trim().toLowerCase()==='true';
 const minDate=()=>String(process.env.ACCURATE_UAT_MIN_DATE||'2026-09-01').trim();
 const databaseName=db=>clean(db?.alias||db?.name||db?.databaseName||db?.companyName||'',160);
@@ -23,7 +23,7 @@ function headersFor(connection){if(connection.mode==='API_TOKEN')return apiToken
 async function testConnection(){const connection=await resolveAccurateConnection();const name=databaseName(connection.database);if(!name||!isTestDatabase(name))throw new Error(`UAT write diblokir: database "${name||'tidak terdeteksi'}" bukan database Test/Tes/UAT/Sandbox.`);return {connection,databaseName:name};}
 async function findJobEntry(jobId){const {blobs}=await jobs().list({prefix:'job/'});for(const blob of blobs){const entry=await jobs().getWithMetadata(blob.key,{type:'json',consistency:'strong'});if(entry?.data?.jobId===String(jobId||''))return {key:blob.key,...entry};}return null;}
 async function findApprovalEntry(id){const key=`request/${id}`;const entry=await approvals().getWithMetadata(key,{type:'json',consistency:'strong'});return entry?.data?{key,...entry}:null;}
-function assertGate(){if(!enabled())throw new Error('ACCURATE_UAT_WRITE_ENABLED belum true.');if(productionEnabled())throw new Error('UAT write diblokir karena ACCURATE_POSTING_ENABLED harus tetap false selama UAT.');}
+function assertGate(){if(!enabled())throw new Error('Jalur UAT dinonaktifkan oleh ACCURATE_UAT_WRITE_ENABLED=false.');if(productionEnabled())throw new Error('UAT write diblokir karena ACCURATE_POSTING_ENABLED harus tetap false selama UAT.');}
 function assertUatJob(job,payload){if(!job?.liveUat)throw new Error('Job bukan live UAT.');if(job.partnerId!=='UAT-ACCURATE')throw new Error('Partner UAT tidak valid.');if(job.journalDraft?.source!=='LIBRA_ACCURATE_LIVE_UAT')throw new Error('Source UAT tidak valid.');if(!String(job.journalNumber||'').startsWith('LBR-UAT-ACC-'))throw new Error('Nomor JV UAT tidak valid.');if(Number(job.journalDraft?.totalDebit)!==10000||Number(job.journalDraft?.totalCredit)!==10000||job.journalDraft?.balanced!==true)throw new Error('Nominal UAT wajib balanced Rp10.000 / Rp10.000.');if((job.journalDraft?.entries||[]).length!==2)throw new Error('UAT wajib tepat 2 baris jurnal.');const tx=String(job.uatTransactionDate||job.journalDraft?.transactionDate||'').slice(0,10);if(!/^20\d{2}-\d{2}-\d{2}$/.test(tx)||tx<minDate())throw new Error(`Tanggal UAT ${tx||'-'} lebih awal dari batas database test ${minDate()}.`);if(!payload?.number||payload.detailJournalVoucher?.length!==2)throw new Error('Payload UAT tidak lengkap.');if(payload.transDate!==`${tx.slice(8,10)}/${tx.slice(5,7)}/${tx.slice(0,4)}`)throw new Error(`Tanggal payload UAT tidak cocok dengan transaction date ${tx}.`);}
 function digestPayload(payload){return crypto.createHash('sha256').update(JSON.stringify(payload)).digest('hex');}
 
