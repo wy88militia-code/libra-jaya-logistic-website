@@ -5,7 +5,10 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>Manual Booking Partner | Libra</title>
-  <link rel="stylesheet" href="portal.css?v=20260904-booking-cascade-2">
+  <link rel="stylesheet" href="portal.css?v=20260904-booking-smu-1">
+  <style>
+    .smu-booking-block{margin:18px 0;padding:16px;border:1px solid #d7e2ec;border-radius:15px;background:#f8fbfd}.smu-head{display:flex;justify-content:space-between;gap:12px;align-items:end;margin-bottom:12px}.smu-head h3{margin:3px 0 0}.smu-mode{display:flex;gap:8px;align-items:end;flex-wrap:wrap}.smu-mode label{min-width:170px}.smu-table-wrap{overflow:auto}.smu-table{width:100%;min-width:1040px;border-collapse:collapse;background:#fff;border-radius:12px;overflow:hidden}.smu-table th,.smu-table td{padding:8px;border-bottom:1px solid #e5edf4;text-align:left;vertical-align:top}.smu-table th{font-size:11px;text-transform:uppercase;color:#6c7f91;background:#f3f7fa}.smu-table input{width:100%;min-width:85px}.smu-table .smu-number{min-width:150px}.smu-table .smu-route{min-width:78px}.smu-table .smu-commodity{min-width:145px}.smu-remove{background:#fff0ef!important;color:#a8332c!important;border:1px solid #f0c5c0!important}.smu-summary{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px}.smu-summary span{background:#edf4fa;padding:7px 10px;border-radius:999px;font-size:12px;font-weight:800}.smu-rule{margin-top:10px;font-size:12px;color:#5f7386;line-height:1.45}.smu-rule b{color:#173b5d}@media(max-width:720px){.smu-head{align-items:stretch;flex-direction:column}.smu-mode{align-items:stretch}.smu-mode label{min-width:0;flex:1}}
+  </style>
 </head>
 <body class="booking-page">
   <header class="top">
@@ -18,12 +21,12 @@
   <main class="wrap booking-wrap">
     <section class="hero booking-hero">
       <div>
-        <span class="booking-eyebrow">BOOKING DOORING & LAST-MILE</span>
+        <span class="booking-eyebrow">BOOKING BERDASARKAN SMU • DOORING & LAST-MILE</span>
         <h1>Manual Booking</h1>
-        <p>Pilih tujuan secara bertingkat dari <strong>Bandara Acuan</strong> sampai <strong>Kelurahan/Kampung</strong>. GPS digunakan untuk memverifikasi titik penerima agar tarif, SLA, dan penugasan kurir lebih presisi.</p>
+        <p>Setiap booking wajib berdasarkan <strong>1 SMU</strong> atau <strong>gabungan beberapa SMU</strong>. Detail SMU menjadi daftar penjemputan kurir di bandara dan dasar rekap fisik incoming.</p>
       </div>
       <div class="booking-progress" aria-label="Tahapan booking">
-        <span><b>1</b> Tujuan</span>
+        <span><b>1</b> Rute + SMU</span>
         <span><b>2</b> Quote</span>
         <span><b>3</b> GPS</span>
         <span><b>4</b> Booking</span>
@@ -33,7 +36,7 @@
     <section class="card booking-card">
       <div class="booking-card-head">
         <span class="step-number">01</span>
-        <div><small>TUJUAN WAJIB SPESIFIK</small><h2>Rute & Quote</h2></div>
+        <div><small>TUJUAN + DATA SMU WAJIB</small><h2>Rute, SMU & Quote</h2></div>
       </div>
 
       <div class="destination-cascade">
@@ -70,8 +73,27 @@
         <div class="destination-rule"><b>Bandara acuan menentukan titik awal last-mile.</b> Kelurahan menentukan tujuan operasional, tarif, dan SLA.</div>
       </div>
 
+      <div class="smu-booking-block">
+        <div class="smu-head">
+          <div><small>DATA BARANG BERDASARKAN SMU</small><h3>SMU Penjemputan Bandara</h3></div>
+          <div class="smu-mode">
+            <label>Mode SMU<select id="smuMode"><option value="SINGLE">1 SMU</option><option value="GABUNGAN">Gabungan SMU</option></select></label>
+            <button id="addSmuBtn" type="button" class="secondary" hidden>+ Tambah SMU</button>
+          </div>
+        </div>
+        <div class="smu-table-wrap">
+          <table class="smu-table">
+            <thead><tr><th>No SMU</th><th>Maskapai</th><th>Flight</th><th>Tanggal</th><th>Origin</th><th>Destination</th><th>Koli</th><th>Berat kg</th><th>Komoditi</th><th></th></tr></thead>
+            <tbody id="smuRows"></tbody>
+          </table>
+        </div>
+        <div class="smu-summary"><span id="smuCountSummary">1 SMU</span><span id="smuPiecesSummary">0 koli</span><span id="smuWeightSummary">0 kg</span></div>
+        <div class="smu-rule"><b>Wajib:</b> Nomor SMU, maskapai, origin, destination, koli, dan berat. Flight/tanggal/komoditi diisi sesuai dokumen SMU bila tersedia. Total berat SMU otomatis menjadi berat quote. Setelah booking berhasil, seluruh SMU langsung masuk daftar kerja kurir penjemput dan Super Admin.</div>
+        <div id="smuStatus" class="status"></div>
+      </div>
+
       <div class="formgrid booking-quote-fields">
-        <label>Berat kiriman (kg)<input id="weight" type="number" min="0.1" step="0.1" placeholder="10"></label>
+        <label>Total berat SMU (kg)<input id="weight" type="number" min="0.1" step="0.01" placeholder="0" readonly></label>
         <label>Referensi partner<input id="partnerRef" maxlength="120" placeholder="Nomor resi/order internal"></label>
       </div>
       <div class="actions"><button id="quoteBtn">Minta Quote</button><button id="refreshQuote" class="secondary" type="button" hidden>Refresh Status Quote</button></div>
@@ -134,12 +156,13 @@
         <span class="step-number">04</span>
         <div><small>KONFIRMASI AKHIR</small><h2>Buat Booking</h2></div>
       </div>
-      <p class="muted">Booking hanya dapat dibuat setelah quote APPROVED, kelurahan dipilih, dan GPS tujuan terkonfirmasi. Jika saldo kurang, booking disimpan sebagai menunggu top-up.</p>
+      <p class="muted">Booking hanya dapat dibuat setelah quote APPROVED, data SMU valid, kelurahan dipilih, dan GPS tujuan terkonfirmasi. Jika saldo kurang, booking disimpan sebagai menunggu top-up.</p>
       <button id="bookingBtn" disabled>Buat Booking & Potong Saldo</button>
       <div id="bookingStatus" class="status"></div>
     </section>
   </main>
 
-  <script src="booking.js?v=20260904-booking-cascade-2"></script>
+  <script src="booking-smu.js?v=20260904-smu-flow-1"></script>
+  <script src="booking.js?v=20260904-booking-smu-1"></script>
 </body>
 </html>
