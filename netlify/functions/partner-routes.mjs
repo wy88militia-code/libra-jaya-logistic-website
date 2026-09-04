@@ -8,7 +8,7 @@ export default async request=>{
   const snapshot=await getMasterSnapshot();
   if(!snapshot)return Response.json({message:'Master rute belum dipublish oleh admin.'},{status:503});
   const blocked=new Set(['OUT_OF_COVERAGE','NOT_ACTIVE','PENDING_VERIFICATION']);
-  const routes=(snapshot.routes||[]).filter(r=>!blocked.has(String(r.coverageStatus||''))).map(r=>({kodeRute:r.kodeRute,kodeWilayah:r.kodeWilayah,kelurahan:r.kelurahan,distrik:r.distrik,kabupatenKota:r.kabupatenKota,hub:r.hub,moda:r.moda,zonaTarif:r.zonaTarif,coverageStatus:r.coverageStatus,skemaLayanan:r.skemaLayanan||r.jenisLayanan,minimumLoadKg:r.minimumLoadKg||null,sla:r.slaTotalHub||r.slaLastmile||r.slaMaster||null})).sort((a,b)=>`${a.kabupatenKota} ${a.distrik} ${a.kelurahan}`.localeCompare(`${b.kabupatenKota} ${b.distrik} ${b.kelurahan}`,'id'));
+  const routes=(snapshot.routes||[]).filter(r=>!blocked.has(String(r.coverageStatus||''))).map(r=>({kodeRute:r.kodeRute,kodeWilayah:r.kodeWilayah,provinsi:r.provinsi,kelurahan:r.kelurahan,distrik:r.distrik,kabupatenKota:r.kabupatenKota,hub:r.hub,moda:r.moda,zonaTarif:r.zonaTarif,coverageStatus:r.coverageStatus,skemaLayanan:r.skemaLayanan||r.jenisLayanan,minimumLoadKg:r.minimumLoadKg||null,sla:r.slaTotalHub||r.slaLastmile||r.slaMaster||null})).sort((a,b)=>`${a.provinsi} ${a.kabupatenKota} ${a.distrik} ${a.kelurahan}`.localeCompare(`${b.provinsi} ${b.kabupatenKota} ${b.distrik} ${b.kelurahan}`,'id'));
   return Response.json({ok:true,partnerId:partner.partnerId,masterVersion:snapshot.version,syncedAt:snapshot.syncedAt,routes},{headers:{'cache-control':'no-store'}});
 };
 export const config={path:'/.netlify/functions/partner-routes',method:'GET',rateLimit:{windowSize:60,windowLimit:60,aggregateBy:'ip',action:'rate_limit'}};
