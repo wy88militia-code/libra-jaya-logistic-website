@@ -1,33 +1,83 @@
 const $=id=>document.getElementById(id);
 let routes=[],currentRoute=null,currentQuote=null;
 let map=null,originMarker=null,destinationMarker=null,geocoder=null,mapsReady=false;
-const DJJ={lat:-2.576953,lng:140.516372};
+const DEFAULT_DJJ={lat:-2.576953,lng:140.516372};
+let originPoint={...DEFAULT_DJJ};
 
 const money=v=>new Intl.NumberFormat('id-ID',{style:'currency',currency:'IDR',maximumFractionDigits:0}).format(Number(v)||0);
 const clean=v=>String(v??'').trim();
 const normalize=v=>clean(v).normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().replace(/[^a-z0-9]+/g,' ').trim();
 function status(el,text,type=''){el.textContent=text;el.className=`status show ${type}`;}
 function requireLogin(res){if(res.status===401){location.href='/partner/login.html?next=/partner/booking.html';return true;}return false;}
+function same(a,b){return clean(a)===clean(b);}
 
-function sortRoutes(items){return [...items].sort((a,b)=>`${clean(a.kabupatenKota)}|${clean(a.distrik)}|${clean(a.kelurahan)}`.localeCompare(`${clean(b.kabupatenKota)}|${clean(b.distrik)}|${clean(b.kelurahan)}`,'id'));}
-function setRouteOptions(items){
- const select=$('route');select.replaceChildren();
- const first=document.createElement('option');first.value='';first.textContent='Pilih Kabupaten/Kota → Distrik → Kelurahan/Kampung';select.append(first);
- const groups=new Map();
- items.forEach((r,i)=>{
-  const city=clean(r.kabupatenKota)||'Wilayah lain';
-  if(!groups.has(city)){const group=document.createElement('optgroup');group.label=city;groups.set(city,group);select.append(group);}
-  const option=document.createElement('option');option.value=String(i);option.textContent=`${clean(r.kelurahan)||'—'} — Distrik ${clean(r.distrik)||'—'} • ${clean(r.kodeRute)||'Rute'}`;groups.get(city).append(option);
- });
+function airportLabel(value){
+ const raw=clean(value);const upper=raw.toUpperCase();
+ if(upper.includes('WMX')||upper.includes('WAMENA'))return 'Bandara Wamena (WMX)';
+ if(upper.includes('DJJ')||upper.includes('SENTANI')||upper.includes('DORTHEYS'))return 'Bandara Sentani (DJJ)';
+ if(upper.includes('OKS')||upper.includes('OKSIBIL'))return 'Bandara Oksibil (OKS)';
+ if(upper.includes('DEX')||upper.includes('DEKAI'))return 'Bandara Nop Goliat Dekai (DEX)';
+ return raw||'Bandara acuan';
+}
+function airportQuery(value){
+ const raw=clean(value);const upper=raw.toUpperCase();
+ if(upper.includes('WMX')||upper.includes('WAMENA'))return 'Bandar Udara Wamena, Papua Pegunungan, Indonesia';
+ if(upper.includes('DJJ')||upper.includes('SENTANI')||upper.includes('DORTHEYS'))return 'Bandar Udara Internasional Dortheys Hiyo Eluay, Sentani, Papua, Indonesia';
+ if(upper.includes('OKS')||upper.includes('OKSIBIL'))return 'Bandar Udara Oksibil, Pegunungan Bintang, Papua Pegunungan, Indonesia';
+ if(upper.includes('DEX')||upper.includes('DEKAI'))return 'Bandar Udara Nop Goliat Dekai, Yahukimo, Papua Pegunungan, Indonesia';
+ return `${raw} airport, Indonesia`;
+}
+
+function sortRoutes(items){return [...items].sort((a,b)=>`${clean(a.hub)}|${clean(a.provinsi)}|${clean(a.kabupatenKota)}|${clean(a.distrik)}|${clean(a.kelurahan)}`.localeCompare(`${clean(b.hub)}|${clean(b.provinsi)}|${clean(b.kabupatenKota)}|${clean(b.distrik)}|${clean(b.kelurahan)}`,'id'));}
+function unique(items,key){return [...new Set(items.map(r=>clean(r[key])).filter(Boolean))].sort((a,b)=>a.localeCompare(b,'id'));}
+function resetSelect(id,placeholder){const select=$(id);select.replaceChildren();const option=document.createElement('option');option.value='';option.textContent=placeholder;select.append(option);select.disabled=true;}
+function fillSelect(id,values,placeholder,labelFn=v=>v){
+ const select=$(id);select.replaceChildren();const first=document.createElement('option');first.value='';first.textContent=placeholder;select.append(first);
+ values.forEach(value=>{const option=document.createElement('option');option.value=value;option.textContent=labelFn(value);select.append(option);});
+ select.disabled=!values.length;
+ if(values.length===1)select.value=values[0];
+ return values.length===1;
+}
+function resetQuoteAndGps(){currentRoute=null;currentQuote=null;$('refreshQuote').hidden=true;$('quoteStatus').className='status';$('quoteStatus').textContent='';renderDestination();resetGps();}
+function routesByAirport(){return routes.filter(r=>same(r.hub,$('airport').value));}
+function routesByProvince(){return routesByAirport().filter(r=>same(r.provinsi,$('province').value));}
+function routesByCity(){return routesByProvince().filter(r=>same(r.kabupatenKota,$('city').value));}
+function routesByDistrict(){return routesByCity().filter(r=>same(r.distrik,$('district').value));}
+
+function populateProvince(){
+ resetSelect('city','Pilih kabupaten/kota');resetSelect('district','Pilih kecamatan/distrik');resetSelect('village','Pilih kelurahan/kampung');resetQuoteAndGps();
+ if(!$('airport').value){resetSelect('province','Pilih provinsi');return;}
+ const auto=fillSelect('province',unique(routesByAirport(),'provinsi'),'Pilih provinsi');
+ $('mapAirportLabel').textContent=airportLabel($('airport').value);resolveSelectedAirportOnMap();
+ if(auto)populateCity();
+}
+function populateCity(){
+ resetSelect('district','Pilih kecamatan/distrik');resetSelect('village','Pilih kelurahan/kampung');resetQuoteAndGps();
+ if(!$('province').value){resetSelect('city','Pilih kabupaten/kota');return;}
+ const auto=fillSelect('city',unique(routesByProvince(),'kabupatenKota'),'Pilih kabupaten/kota');if(auto)populateDistrict();
+}
+function populateDistrict(){
+ resetSelect('village','Pilih kelurahan/kampung');resetQuoteAndGps();
+ if(!$('city').value){resetSelect('district','Pilih kecamatan/distrik');return;}
+ const auto=fillSelect('district',unique(routesByCity(),'distrik'),'Pilih kecamatan/distrik');if(auto)populateVillage();
+}
+function populateVillage(){
+ resetQuoteAndGps();
+ if(!$('district').value){resetSelect('village','Pilih kelurahan/kampung');return;}
+ const auto=fillSelect('village',unique(routesByDistrict(),'kelurahan'),'Pilih kelurahan/kampung');if(auto)finalizeRoute();
+}
+function finalizeRoute(){
+ currentRoute=routesByDistrict().find(r=>same(r.kelurahan,$('village').value))||null;currentQuote=null;$('refreshQuote').hidden=true;$('quoteStatus').className='status';$('quoteStatus').textContent='';renderDestination();resetGps();
 }
 
 async function loadRoutes(){
  try{
   const res=await fetch('/.netlify/functions/partner-routes');if(requireLogin(res))return;
   const data=await res.json();if(!res.ok)throw new Error(data.message||'Master rute gagal dimuat.');
-  routes=sortRoutes(data.routes||[]);setRouteOptions(routes);
+  routes=sortRoutes(data.routes||[]);
+  const auto=fillSelect('airport',unique(routes,'hub'),'Pilih bandara acuan',airportLabel);if(auto)populateProvince();
  }catch(e){
-  const select=$('route');select.replaceChildren();const option=document.createElement('option');option.textContent='Master rute tidak tersedia';select.append(option);status($('quoteStatus'),e.message,'err');
+  resetSelect('airport','Master rute tidak tersedia');status($('quoteStatus'),e.message,'err');
  }
 }
 
@@ -36,12 +86,16 @@ function renderDestination(){
  $('destinationSummary').classList.remove('hidden');
  $('selectedKelurahan').textContent=clean(currentRoute.kelurahan)||'—';
  $('selectedRouteCode').textContent=clean(currentRoute.kodeRute)||'RUTE';
+ $('selectedAirport').textContent=airportLabel(currentRoute.hub);
+ $('selectedProvince').textContent=clean(currentRoute.provinsi)||'—';
  $('selectedCity').textContent=clean(currentRoute.kabupatenKota)||'—';
  $('selectedDistrict').textContent=clean(currentRoute.distrik)||'—';
  $('selectedVillage').textContent=clean(currentRoute.kelurahan)||'—';
+ $('mapAirportLabel').textContent=airportLabel(currentRoute.hub);
  $('gpsTargetArea').textContent=clean(currentRoute.kelurahan)||'—';
- $('gpsTargetRegion').textContent=`Distrik ${clean(currentRoute.distrik)||'—'}, ${clean(currentRoute.kabupatenKota)||'—'}`;
- $('confirmKelLabel').textContent=`${clean(currentRoute.kelurahan)||'kelurahan tujuan'}, Distrik ${clean(currentRoute.distrik)||'—'}`;
+ $('gpsTargetRegion').textContent=`${clean(currentRoute.distrik)||'—'}, ${clean(currentRoute.kabupatenKota)||'—'} • ${airportLabel(currentRoute.hub)}`;
+ $('confirmKelLabel').textContent=`${clean(currentRoute.kelurahan)||'kelurahan tujuan'}, ${clean(currentRoute.distrik)||'—'}`;
+ resolveSelectedAirportOnMap();
 }
 
 function resetGps(){
@@ -51,22 +105,23 @@ function resetGps(){
  $('detectedAddress').parentElement.classList.remove('match','warn');
  $('gpsStatus').className='status';$('gpsStatus').textContent='';
  if(destinationMarker)destinationMarker.setMap(null);destinationMarker=null;
- if(map&&mapsReady){map.setCenter(DJJ);map.setZoom(11);}
+ if(map&&mapsReady){map.setCenter(originPoint);map.setZoom(11);}
  refreshBookingButton();
 }
 
 function gpsIsValid(){const accuracy=Number($('accuracy').value);return Number.isFinite(Number($('lat').value))&&Number.isFinite(Number($('lng').value))&&accuracy>0&&accuracy<=200;}
 function refreshBookingButton(){const approved=currentQuote?.status==='APPROVED';$('bookingBtn').disabled=!(approved&&currentRoute&&gpsIsValid()&&$('confirmKel').checked);}
 
-$('route').addEventListener('change',()=>{
- currentRoute=routes[Number($('route').value)]||null;currentQuote=null;$('refreshQuote').hidden=true;
- $('quoteStatus').className='status';$('quoteStatus').textContent='';renderDestination();resetGps();
-});
+$('airport').addEventListener('change',populateProvince);
+$('province').addEventListener('change',populateCity);
+$('city').addEventListener('change',populateDistrict);
+$('district').addEventListener('change',populateVillage);
+$('village').addEventListener('change',finalizeRoute);
 $('confirmKel').addEventListener('change',refreshBookingButton);
 
 $('quoteBtn').addEventListener('click',async()=>{
- currentRoute=routes[Number($('route').value)]||null;const weight=Number($('weight').value);
- if(!currentRoute||!weight){status($('quoteStatus'),'Pilih Kelurahan/Kampung tujuan dan isi berat kiriman.','err');return;}
+ const weight=Number($('weight').value);
+ if(!currentRoute||!weight){status($('quoteStatus'),'Lengkapi Bandara Acuan sampai Kelurahan/Kampung, lalu isi berat kiriman.','err');return;}
  status($('quoteStatus'),'Meminta quote…');
  try{
   const res=await fetch('/.netlify/functions/partner-quote',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({kodeRute:currentRoute.kodeRute,weightKg:weight})});if(requireLogin(res))return;
@@ -77,7 +132,7 @@ $('quoteBtn').addEventListener('click',async()=>{
 function renderQuote(){
  if(!currentQuote)return;
  const approved=currentQuote.status==='APPROVED';
- const detail=`${currentQuote.quoteId} • ${currentQuote.kelurahan}, ${currentQuote.distrik}${currentRoute?.kabupatenKota?' • '+currentRoute.kabupatenKota:''} • ${currentQuote.weightKg} kg${currentQuote.sla?' • SLA '+currentQuote.sla:''}`;
+ const detail=`${currentQuote.quoteId} • ${airportLabel(currentRoute?.hub)} • ${currentQuote.kelurahan}, ${currentQuote.distrik}${currentRoute?.kabupatenKota?' • '+currentRoute.kabupatenKota:''} • ${currentQuote.weightKg} kg${currentQuote.sla?' • SLA '+currentQuote.sla:''}`;
  status($('quoteStatus'),approved?`APPROVED — ${money(currentQuote.amount)} — ${detail}`:`${currentQuote.status} — ${detail}. Menunggu approval Admin Libra sebelum booking.`,approved?'ok':'');refreshBookingButton();
 }
 
@@ -99,20 +154,33 @@ async function initMaps(){
   const res=await fetch('/maps/browser-config',{cache:'no-store'});const data=await res.json();if(!res.ok||!data.configured||!data.apiKey)return;
   await loadGoogleMaps(data.apiKey);
   const canvas=$('mapCanvas');canvas.replaceChildren();
-  map=new google.maps.Map(canvas,{center:DJJ,zoom:11,mapTypeControl:false,streetViewControl:false,fullscreenControl:false,gestureHandling:'cooperative'});
-  geocoder=new google.maps.Geocoder();
-  originMarker=new google.maps.Marker({map,position:DJJ,title:'Bandara Sentani (DJJ)',label:{text:'DJJ',fontWeight:'700',fontSize:'10px'}});
-  mapsReady=true;
+  map=new google.maps.Map(canvas,{center:originPoint,zoom:11,mapTypeControl:false,streetViewControl:false,fullscreenControl:false,gestureHandling:'cooperative'});
+  geocoder=new google.maps.Geocoder();mapsReady=true;await resolveSelectedAirportOnMap();
  }catch(e){
   const placeholder=$('mapPlaceholder');if(placeholder){placeholder.querySelector('small').textContent='Peta belum dapat dimuat. GPS booking tetap dapat digunakan.';}
  }
+}
+
+function resolveSelectedAirportOnMap(){
+ if(!mapsReady||!geocoder)return Promise.resolve();
+ const selected=$('airport').value;if(!selected){originPoint={...DEFAULT_DJJ};return Promise.resolve();}
+ const label=airportLabel(selected);$('mapAirportLabel').textContent=label;
+ return new Promise(resolve=>{
+  geocoder.geocode({address:airportQuery(selected)},(results,gStatus)=>{
+   if(gStatus==='OK'&&results?.length){const loc=results[0].geometry.location;originPoint={lat:loc.lat(),lng:loc.lng()};}
+   else if(label.includes('(DJJ)'))originPoint={...DEFAULT_DJJ};
+   if(originMarker)originMarker.setMap(null);
+   originMarker=new google.maps.Marker({map,position:originPoint,title:label,label:{text:(label.match(/\(([A-Z]{3})\)/)||[])[1]||'HUB',fontWeight:'700',fontSize:'10px'}});
+   if(!destinationMarker){map.setCenter(originPoint);map.setZoom(11);}resolve();
+  });
+ });
 }
 
 function showDestinationOnMap(point){
  if(!map||!mapsReady)return;
  if(destinationMarker)destinationMarker.setMap(null);
  destinationMarker=new google.maps.Marker({map,position:point,title:`Titik penerima — ${clean(currentRoute?.kelurahan)||'tujuan'}`});
- const bounds=new google.maps.LatLngBounds();bounds.extend(DJJ);bounds.extend(point);map.fitBounds(bounds,70);
+ const bounds=new google.maps.LatLngBounds();bounds.extend(originPoint);bounds.extend(point);map.fitBounds(bounds,70);
  google.maps.event.addListenerOnce(map,'idle',()=>{if(map.getZoom()>15)map.setZoom(15);});
 }
 
@@ -135,12 +203,12 @@ function reverseGeocode(point){
 }
 
 $('gpsBtn').addEventListener('click',()=>{
- if(!currentRoute){status($('gpsStatus'),'Pilih Kabupaten/Kota, Distrik, dan Kelurahan/Kampung terlebih dahulu.','err');return;}
+ if(!currentRoute){status($('gpsStatus'),'Lengkapi Bandara Acuan, Provinsi, Kab/Kota, Kecamatan/Distrik, dan Kelurahan/Kampung terlebih dahulu.','err');return;}
  if(!navigator.geolocation){status($('gpsStatus'),'Perangkat tidak mendukung GPS browser.','err');return;}
  status($('gpsStatus'),'Mengambil GPS presisi…');
  navigator.geolocation.getCurrentPosition(pos=>{
   const c=pos.coords;const point={lat:c.latitude,lng:c.longitude};const accuracy=Math.round(c.accuracy);
-  $('lat').value=c.latitude.toFixed(7);$('lng').value=c.longitude.toFixed(7);$('accuracy').value=String(accuracy);$('confirmedArea').value=`${clean(currentRoute.kelurahan)}, ${clean(currentRoute.distrik)}, ${clean(currentRoute.kabupatenKota)}`;
+  $('lat').value=c.latitude.toFixed(7);$('lng').value=c.longitude.toFixed(7);$('accuracy').value=String(accuracy);$('confirmedArea').value=`${airportLabel(currentRoute.hub)} | ${clean(currentRoute.provinsi)} | ${clean(currentRoute.kabupatenKota)} | ${clean(currentRoute.distrik)} | ${clean(currentRoute.kelurahan)}`;
   $('latDisplay').textContent=c.latitude.toFixed(6);$('lngDisplay').textContent=c.longitude.toFixed(6);$('accuracyDisplay').textContent=`${accuracy} m`;
   $('confirmKel').checked=false;refreshBookingButton();showDestinationOnMap(point);reverseGeocode(point);
   if(accuracy>200)status($('gpsStatus'),`Akurasi GPS ${accuracy} m. Harus 200 m atau lebih baik. Coba di area terbuka dan ambil ulang GPS.`,'err');
@@ -158,11 +226,9 @@ $('bookingBtn').addEventListener('click',async()=>{
  try{
   const res=await fetch('/.netlify/functions/partner-booking-create',{method:'POST',headers:{'content-type':'application/json','idempotency-key':payload.idempotencyKey},body:JSON.stringify(payload)});if(requireLogin(res))return;
   const data=await res.json();if(res.status===402){status($('bookingStatus'),`${data.message} Booking ID: ${data.bookingId||'—'}. Saldo: ${money(data.balance)}. Silakan top-up di menu Saldo.`,'err');return;}
-  if(!res.ok)throw new Error(data.message||'Booking gagal.');status($('bookingStatus'),`Booking berhasil: ${data.booking.bookingId}. Tujuan ${clean(currentRoute.kelurahan)}, ${clean(currentRoute.distrik)}. Saldo tersisa ${money(data.balance)}.`,'ok');currentQuote.status='BOOKED';
+  if(!res.ok)throw new Error(data.message||'Booking gagal.');status($('bookingStatus'),`Booking berhasil: ${data.booking.bookingId}. ${airportLabel(currentRoute.hub)} → ${clean(currentRoute.kelurahan)}, ${clean(currentRoute.distrik)}. Saldo tersisa ${money(data.balance)}.`,'ok');currentQuote.status='BOOKED';
  }catch(e){status($('bookingStatus'),e.message,'err');}
  finally{refreshBookingButton();}
 });
 
-renderDestination();
-loadRoutes();
-initMaps();
+renderDestination();loadRoutes();initMaps();
