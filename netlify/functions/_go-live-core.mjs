@@ -6,6 +6,7 @@ import { offsiteBackupConfig } from './_offsite-backup-core.mjs';
 import { listPartners } from './_partner-core.mjs';
 import { privacyRetentionConfig } from './_privacy-retention-core.mjs';
 import { listRatePlans } from './_rate-plan-core.mjs';
+import { mapsConfigStatus } from './_maps-core.mjs';
 import { getVendorMaster, isVendorMasterConfigured } from './_vendor-master-core.mjs';
 
 const bool=v=>Boolean(String(v||'').trim());
@@ -26,7 +27,7 @@ export const DEVELOPMENT_SEQUENCE=[
 
 export async function buildGoLiveReadiness(session=null){
  const [master,vendor,partners,ratePlans,backups]=await Promise.all([getMasterSnapshot().catch(()=>null),getVendorMaster().catch(()=>null),listPartners().catch(()=>[]),listRatePlans().catch(()=>[]),listBackups(20).catch(()=>[])]);
- const accurate=accurateConfigStatus(),alerts=externalAlertConfig(),offsite=offsiteBackupConfig(),privacy=privacyRetentionConfig(),backup=backupPolicy();
+ const accurate=accurateConfigStatus(),alerts=externalAlertConfig(),offsite=offsiteBackupConfig(),privacy=privacyRetentionConfig(),backup=backupPolicy(),maps=mapsConfigStatus();
  const latestBackup=backups[0]||null,latestBackupAge=ageHours(latestBackup?.createdAt),activeRates=ratePlans.filter(x=>x.status==='ACTIVE'&&(x.rules||[]).some(r=>r.active!==false)).length,activePartners=partners.filter(x=>x.status==='ACTIVE').length;
  const xenditSecret=bool(process.env.XENDIT_SECRET_KEY),xenditWebhook=bool(process.env.XENDIT_WEBHOOK_TOKEN),partnerSecret=String(process.env.PARTNER_SESSION_SECRET||'').length>=32,adminSecret=String(process.env.ADMIN_SESSION_SECRET||'').length>=32;
  const checks=[
@@ -49,7 +50,7 @@ export async function buildGoLiveReadiness(session=null){
   check('BACKUP_OFFSITE_EVIDENCE','Latest backup off-site evidence','ADVISORY',Boolean(latestBackup?.offsite&&['UPLOADED','IMPORTED'].includes(latestBackup.offsite.status)),latestBackup?.offsite?.status||'Belum ada bukti off-site pada backup terakhir.'),
   check('RETENTION_FAIL_CLOSED','Privacy retention fail-closed','REQUIRED',privacy.deleteEnabled===false,privacy.deleteEnabled?'Deletion gate sedang aktif — kunci kembali untuk cutover kecuali sedang maintenance.':'DRY_RUN_ONLY / deletion gate locked.'),
   check('BACKUP_COVERAGE','Critical backup policy coverage','REQUIRED',backup.protectedStores.includes('libra-claims')&&backup.protectedStores.includes('libra-tickets')&&backup.protectedStores.includes('libra-profitability'),'Claims, ticket, profitability dan data inti termasuk protected backup scope.'),
-  check('MAPS','Google Maps enhanced geocoding/routing','ADVISORY',false,'Belum menjadi dependency core: GPS + kodeWilayah + geofence berjalan tanpa Maps. Routes/Geocoding tetap improvement terpisah.'),
+  check('MAPS','Google Maps enhanced geocoding/routing','ADVISORY',maps.configured,`Browser key ${maps.browserConfigured?'ready':'belum'} • server key ${maps.serverConfigured?'ready':'belum'}. Tetap bukan dependency core sebelum hasil pemetaan ditinjau.`),
  ];
  const required=checks.filter(x=>x.level==='REQUIRED'),blockers=required.filter(x=>x.status!=='PASS'),warnings=checks.filter(x=>x.status==='WARNING');
  const codeReady=DEVELOPMENT_SEQUENCE.every(x=>x.status==='CODE_UAT_READY');
