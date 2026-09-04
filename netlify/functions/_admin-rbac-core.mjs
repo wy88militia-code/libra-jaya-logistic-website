@@ -12,6 +12,7 @@ const PATH_ROLES=[
  [/^\/admin-accurate(?:\/simulation)?$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-quotes$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-master-sheet$/,['SUPERADMIN','OPS']],
+ [/^\/admin-maps$/,['SUPERADMIN','OPS']],
  [/^\/admin-bookings$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
  [/^\/admin-courier$/,['SUPERADMIN','OPS']],
  [/^\/admin-courier-assignment$/,['SUPERADMIN','OPS']],

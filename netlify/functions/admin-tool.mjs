@@ -20,6 +20,7 @@ const cards=[
  ['Link Partner','Link yang dibagikan untuk Manual Booking dan onboarding integrasi API.','/admin-partner-links','Buka Link Partner'],
  ['Rate Plan Partner','Harga jual, minimum charge, surcharge dan cut-off per partner. Perubahan aktif perlu checker.','/admin-rate-plans','Buka Rate Plan'],
  ['Master Rute & SLA','Preview dan publish Master Google Sheet ke backend.','/admin-master-sheet','Buka Master'],
+ ['Google Maps & Geocoding','Tes koneksi browser/server untuk pencarian alamat, geocoding dan perhitungan rute.','/admin-maps','Buka Maps'],
  ['SLA Command Center','Monitor HIJAU/KUNING/MERAH, connecting flight dan stale tracking.','/admin-sla-control','Buka SLA Monitor'],
  ['Customer Service Tickets','Antrean keluhan partner, SLA response/resolution, PIC, balasan partner dan catatan internal.','/admin-tickets','Buka Ticket Desk'],
  ['Quote & Booking','Approve quote manual sebelum saldo dipotong.','/admin-quotes','Buka Quote'],
