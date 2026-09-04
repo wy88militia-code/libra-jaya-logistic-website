@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 
 const DEFAULT_SHEET_ID='1bE37sgz-KfggVVz9cIaEQn855bbITwtD8tyyVlUMX1k';
 const SHEET_NAME='Jarak Bandara-Kelurahan';
+const DJJ={latitude:-2.576953,longitude:140.516372};
 const clean=v=>String(v??'').trim();
 const normalize=v=>clean(v).toLowerCase().normalize('NFD').replace(/[\u0300-\u036f]/g,'').replace(/[^a-z0-9]+/g,' ').trim();
 const privateKey=v=>clean(v).replace(/\\n/g,'\n');
@@ -49,6 +50,20 @@ function resultScore(result,row){
  const village=placeToken(row.kelurahan),district=placeToken(row.distrik),city=placeToken(row.kabupatenKota),province=placeToken(row.provinsi);
  let score=0;if(village&&hay.includes(village))score+=6;if(district&&hay.includes(district))score+=2;if(city&&hay.includes(city))score+=2;if(province&&hay.includes(province))score+=1;return score;
 }
+function durationText(value){
+ const seconds=Math.max(0,Math.round(Number(String(value||'').replace('s',''))||0));
+ const hours=Math.floor(seconds/3600),minutes=Math.round((seconds%3600)/60);
+ if(hours&&minutes)return `${hours} jam ${minutes} menit`;if(hours)return `${hours} jam`;return `${Math.max(minutes,1)} menit`;
+}
+async function driveRoute(latitude,longitude){
+ const key=config().mapsKey;
+ const controller=new AbortController(),timer=setTimeout(()=>controller.abort(),12000);
+ try{
+  const res=await fetch('https://routes.googleapis.com/directions/v2:computeRoutes',{method:'POST',signal:controller.signal,headers:{'content-type':'application/json','X-Goog-Api-Key':key,'X-Goog-FieldMask':'routes.distanceMeters,routes.duration'},body:JSON.stringify({origin:{location:{latLng:DJJ}},destination:{location:{latLng:{latitude,longitude}}},travelMode:'DRIVE',routingPreference:'TRAFFIC_UNAWARE',computeAlternativeRoutes:false,languageCode:'id-ID',units:'METRIC'})});
+  const body=await res.json();if(!res.ok)throw new Error(body?.error?.message||`Routes HTTP ${res.status}`);const route=body.routes?.[0];if(!route?.distanceMeters)throw new Error('Routes DRIVE tidak menemukan jalur.');
+  return {distanceKm:Number(route.distanceMeters)/1000,duration:durationText(route.duration),durationRaw:clean(route.duration)};
+ }finally{clearTimeout(timer);}
+}
 
 async function geocode(row){
  const key=config().mapsKey;if(key.length<20)throw new Error('GOOGLE_MAPS_SERVER_API_KEY belum dikonfigurasi.');
@@ -61,7 +76,8 @@ async function geocode(row){
   const lat=Number(best.r.geometry?.location?.lat),lng=Number(best.r.geometry?.location?.lng);if(!Number.isFinite(lat)||!Number.isFinite(lng))throw new Error('Koordinat Google tidak valid.');
   if(best.score<4)throw new Error(`LOW CONFIDENCE (${best.score}) — ${best.r.formatted_address||query}`);
   const locationType=clean(best.r.geometry?.location_type)||'UNKNOWN';const partial=best.r.partial_match?'PARTIAL MATCH':'MATCH';
-  return {...row,ok:true,latitude:lat,longitude:lng,address:clean(best.r.formatted_address),status:`GOOGLE API PASS - ${partial} - ${locationType}`,score:best.score};
+  let route=null,routeError='';try{route=await driveRoute(lat,lng);}catch(e){routeError=clean(e.message)||'Routes gagal';}
+  return {...row,ok:true,latitude:lat,longitude:lng,address:clean(best.r.formatted_address),status:`GOOGLE API PASS - ${partial} - ${locationType}${route?' | ROUTES PASS':' | ROUTES GAGAL'}`,score:best.score,route,routeError};
  }finally{clearTimeout(timer);}
 }
 
@@ -75,17 +91,19 @@ function witDate(){return new Intl.DateTimeFormat('sv-SE',{timeZone:'Asia/Jayapu
 async function writeResults(token,results){
  const c=config(),date=witDate(),data=[];
  for(const r of results){
-  if(r.ok)data.push({range:`'${SHEET_NAME}'!AE${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[[r.latitude,r.longitude,'Google Maps Geocoding API',r.status,date,r.address]]});
-  else data.push({range:`'${SHEET_NAME}'!AG${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[['Google Maps Geocoding API',`GOOGLE API GAGAL - ${clean(r.error).slice(0,180)}`,date,'']]});
+  if(r.ok){
+   data.push({range:`'${SHEET_NAME}'!AE${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[[r.latitude,r.longitude,'Google Maps Geocoding API + Routes API',r.status,date,r.address]]});
+   if(r.route)data.push({range:`'${SHEET_NAME}'!K${r.rowNumber}:L${r.rowNumber}`,majorDimension:'ROWS',values:[[Number(r.route.distanceKm.toFixed(1)),r.route.duration]]});
+  }else data.push({range:`'${SHEET_NAME}'!AG${r.rowNumber}:AJ${r.rowNumber}`,majorDimension:'ROWS',values:[['Google Maps Geocoding API',`GOOGLE API GAGAL - ${clean(r.error).slice(0,180)}`,date,'']]});
  }
  if(!data.length)return;
  const res=await fetch(`https://sheets.googleapis.com/v4/spreadsheets/${encodeURIComponent(c.sheetId)}/values:batchUpdate`,{method:'POST',headers:{authorization:`Bearer ${token}`,'content-type':'application/json'},body:JSON.stringify({valueInputOption:'RAW',data})});
- const body=await res.json();if(!res.ok)throw new Error(body?.error?.message||'Gagal menulis hasil geocoding ke Google Sheet.');
+ const body=await res.json();if(!res.ok)throw new Error(body?.error?.message||'Gagal menulis hasil Google ke Google Sheet.');
 }
 
 export async function generatePilotCoordinates(){
  const token=await sheetsToken(),rows=await readPilotRows(token);if(rows.length!==PILOT_ROUTE_CODES.length)throw new Error(`Rute pilot di Sheet tidak lengkap: ditemukan ${rows.length}/${PILOT_ROUTE_CODES.length}.`);
  const results=await mapLimit(rows,5,geocode);await writeResults(token,results);
- const success=results.filter(r=>r.ok),failed=results.filter(r=>!r.ok);
- return {generatedAt:new Date().toISOString(),total:results.length,success:success.length,failed:failed.length,results};
+ const success=results.filter(r=>r.ok),failed=results.filter(r=>!r.ok),routePass=results.filter(r=>r.ok&&r.route).length;
+ return {generatedAt:new Date().toISOString(),total:results.length,success:success.length,failed:failed.length,routePass,results};
 }
