@@ -19,7 +19,6 @@ const now=()=>new Date().toISOString();
 const num=v=>Number.isFinite(Number(v))?Number(v):0;
 const ageMin=v=>{const t=new Date(v||0).getTime();return Number.isFinite(t)&&t>0?Math.round((Date.now()-t)/6000)/10:null;};
 const check=(id,label,status,detail,{link='/admin-tool',ageMinutes=null,blocking=true,meta=null}={})=>({id,label,status,detail,link,ageMinutes,blocking,meta});
-const statusRank={PASS:0,MANUAL:0,WARN:1,FAIL:2};
 const pilotSet=new Set(PILOT_ROUTE_CODES);
 function fingerprint(checks){return crypto.createHash('sha256').update(checks.filter(x=>['WARN','FAIL'].includes(x.status)).map(x=>`${x.id}:${x.status}`).sort().join('|')).digest('hex').slice(0,16);}
 function workerCheck(id,label,row,{pass=30,warn=60,link,missing='WARN'}={}){
@@ -52,6 +51,8 @@ export async function buildSystemHealth(){
   else checks.push(check('GOOGLE_MAPS','Google Maps & Routes','PASS','Server API key + Browser API key terkonfigurasi.',{link:'/admin-maps-pilot'}));
   const pilotReady=pilot.length===PILOT_ROUTE_CODES.length&&verified+confirmation>=PILOT_ROUTE_CODES.length&&verified>=PILOT_ROUTE_CODES.length-confirmation;
   checks.push(check('PILOT_ROUTES','41 Rute Pilot',pilotReady?'PASS':'WARN',`${pilot.length}/${PILOT_ROUTE_CODES.length} ada di Master • ${verified} Routes terverifikasi • ${confirmation} konfirmasi operasional • ${autoPriced} punya harga rekomendasi.`,{link:'/admin-maps-pilot',blocking:false,meta:{pilot:pilot.length,verified,confirmation,autoPriced}}));
+  const elevationEligible=pilot.filter(r=>!r.requiresOperationalConfirmation&&(r.autoVerified||String(r.statusKoordinat||'').includes('ROUTES PASS')||String(r.statusVerifikasi||'').includes('TERVERIFIKASI'))),elevationPass=elevationEligible.filter(r=>String(r.elevationStatus||r.elevationModelStatus||'').toUpperCase().includes('ELEVATION PASS')).length;
+  checks.push(check('ELEVATION_TERRAIN','Elevation & Terrain',elevationEligible.length>0&&elevationPass===elevationEligible.length?'PASS':'WARN',`${elevationPass}/${elevationEligible.length||0} rute darat terverifikasi memiliki profil elevasi. BBM efektif dan terrain maintenance baru final setelah Elevation PASS.`,{link:'/admin-maps-pilot',blocking:false,meta:{eligible:elevationEligible.length,pass:elevationPass,pending:Math.max(0,elevationEligible.length-elevationPass)}}));
 
   const vendorAge=ageMin(lastVendor?.syncedAt||vendor?.syncedAt||vendor?.publishedAt);
   if(!isVendorMasterConfigured())checks.push(check('VENDOR_MASTER','Vendor Master & Cost','WARN','Credential Vendor Master belum lengkap. Operasional inti tetap dapat berjalan, tetapi expected cost/profitability tidak lengkap.',{link:'/admin-vendor-master',blocking:false}));
@@ -101,4 +102,5 @@ export async function runSystemHealth({emitNotifications=true,source='SYSTEM'}={
   if(emitNotifications)try{await notifyTransition(previous,snapshot);}catch{}
   return snapshot;
 }
-export async function getLatestSystemHealth(){return store().get(CURRENT,{type:'json',consistency:'strong'});}
+export async function getLatestSystemHealth(){return store().get(CURRENT,{type:'json',consistency:'strong'});
+}
