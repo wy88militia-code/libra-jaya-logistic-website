@@ -1,1 +1,131 @@
-<!doctype html><html lang="id"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="robots" content="noindex,nofollow"><title>Manual Booking Partner | Libra</title><link rel="stylesheet" href="portal.css"></head><body><header class="top"><div class="topin"><div class="brand"><strong>LIBRA JAYA LOGISTIC</strong><span>Partner • Manual Booking</span></div><div><a href="/partner/wallet.html">Saldo</a> &nbsp; <a href="/.netlify/functions/partner-logout">Keluar</a></div></div></header><main class="wrap"><section class="hero"><h1>Manual Booking</h1><p>Pilih kelurahan resmi dari Master Libra, minta quote, konfirmasi GPS tujuan, lalu booking. Saldo deposit dipotong hanya setelah quote sah dan booking berhasil.</p></section><section class="card"><h2>1. Rute & Quote</h2><div class="formgrid"><label class="full">Cari tujuan<select id="route"><option value="">Memuat Master Rute…</option></select></label><label>Berat kiriman (kg)<input id="weight" type="number" min="0.1" step="0.1" placeholder="10"></label><label>Referensi partner<input id="partnerRef" maxlength="120" placeholder="Nomor resi/order internal"></label></div><div class="actions"><button id="quoteBtn">Minta Quote</button><button id="refreshQuote" class="secondary" type="button" hidden>Refresh Status Quote</button></div><div id="quoteStatus" class="status"></div></section><section class="card"><h2>2. Pengirim & Penerima</h2><div class="formgrid"><label>Nama pengirim<input id="senderName" maxlength="120"></label><label>HP pengirim<input id="senderPhone" maxlength="40"></label><label class="full">Alamat pengirim<textarea id="senderAddress"></textarea></label><label>Nama penerima<input id="recipientName" maxlength="120"></label><label>HP penerima<input id="recipientPhone" maxlength="40"></label><label class="full">Alamat penerima<textarea id="recipientAddress"></textarea></label></div></section><section class="card"><h2>3. Kunci Lokasi Tujuan</h2><p class="muted">GPS harus sesuai tujuan dan akurasi maksimum 200 meter. Pastikan kelurahan yang dipilih benar sebelum booking.</p><div class="actions"><button id="gpsBtn" type="button">Ambil GPS Perangkat</button></div><div class="formgrid" style="margin-top:14px"><label>Latitude<input id="lat" readonly></label><label>Longitude<input id="lng" readonly></label><label>Akurasi GPS<input id="accuracy" readonly></label><label>Kelurahan terkonfirmasi<input id="confirmedArea" readonly></label><label class="full"><input id="confirmKel" type="checkbox" style="width:auto;margin-right:8px">Saya mengonfirmasi kelurahan tujuan dan titik GPS sudah benar.</label></div><div id="gpsStatus" class="status"></div></section><section class="card"><h2>4. Buat Booking</h2><p class="muted">Jika saldo kurang, booking disimpan sebagai menunggu top-up. Pengiriman belum masuk proses pickup sebelum saldo mencukupi.</p><button id="bookingBtn" disabled>Buat Booking & Potong Saldo</button><div id="bookingStatus" class="status"></div></section></main><script src="booking.js"></script></body></html>
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow">
+  <title>Manual Booking Partner | Libra</title>
+  <link rel="stylesheet" href="portal.css?v=20260904-booking-map-1">
+</head>
+<body class="booking-page">
+  <header class="top">
+    <div class="topin">
+      <div class="brand"><strong>LIBRA JAYA LOGISTIC</strong><span>Partner • Manual Booking</span></div>
+      <div><a href="/partner/wallet.html">Saldo</a> &nbsp; <a href="/.netlify/functions/partner-logout">Keluar</a></div>
+    </div>
+  </header>
+
+  <main class="wrap booking-wrap">
+    <section class="hero booking-hero">
+      <div>
+        <span class="booking-eyebrow">BOOKING DOORING & LAST-MILE</span>
+        <h1>Manual Booking</h1>
+        <p>Tujuan wajib dikunci sampai tingkat <strong>Kelurahan/Kampung</strong> dari Master Libra. GPS digunakan untuk memverifikasi titik penerima agar tarif, SLA, dan penugasan kurir lebih presisi.</p>
+      </div>
+      <div class="booking-progress" aria-label="Tahapan booking">
+        <span><b>1</b> Kelurahan</span>
+        <span><b>2</b> Quote</span>
+        <span><b>3</b> GPS</span>
+        <span><b>4</b> Booking</span>
+      </div>
+    </section>
+
+    <section class="card booking-card">
+      <div class="booking-card-head">
+        <span class="step-number">01</span>
+        <div><small>TUJUAN WAJIB SPESIFIK</small><h2>Rute & Quote</h2></div>
+      </div>
+
+      <div class="formgrid">
+        <label class="full destination-picker">Kelurahan / Kampung tujuan
+          <select id="route"><option value="">Memuat Master Rute…</option></select>
+          <span class="field-help">Pilih wilayah resmi dari Master Libra. Nama kota saja tidak dapat digunakan untuk booking.</span>
+        </label>
+      </div>
+
+      <div id="destinationSummary" class="destination-summary hidden" aria-live="polite">
+        <div class="destination-summary-head">
+          <div><span class="destination-pin">⌖</span><div><small>TUJUAN TERPILIH</small><strong id="selectedKelurahan">—</strong></div></div>
+          <span id="selectedRouteCode" class="route-code">—</span>
+        </div>
+        <div class="destination-levels">
+          <div><small>Kabupaten / Kota</small><strong id="selectedCity">—</strong></div>
+          <div><small>Distrik</small><strong id="selectedDistrict">—</strong></div>
+          <div class="village-level"><small>Kelurahan / Kampung</small><strong id="selectedVillage">—</strong></div>
+        </div>
+        <div class="destination-rule"><b>Kelurahan adalah dasar perhitungan.</b> Titik GPS pada langkah 3 harus dikonfirmasi sesuai wilayah ini.</div>
+      </div>
+
+      <div class="formgrid booking-quote-fields">
+        <label>Berat kiriman (kg)<input id="weight" type="number" min="0.1" step="0.1" placeholder="10"></label>
+        <label>Referensi partner<input id="partnerRef" maxlength="120" placeholder="Nomor resi/order internal"></label>
+      </div>
+      <div class="actions"><button id="quoteBtn">Minta Quote</button><button id="refreshQuote" class="secondary" type="button" hidden>Refresh Status Quote</button></div>
+      <div id="quoteStatus" class="status"></div>
+    </section>
+
+    <section class="card booking-card">
+      <div class="booking-card-head">
+        <span class="step-number">02</span>
+        <div><small>DATA KONTAK</small><h2>Pengirim & Penerima</h2></div>
+      </div>
+      <div class="formgrid">
+        <label>Nama pengirim<input id="senderName" maxlength="120"></label>
+        <label>HP pengirim<input id="senderPhone" maxlength="40"></label>
+        <label class="full">Alamat pengirim<textarea id="senderAddress"></textarea></label>
+        <label>Nama penerima<input id="recipientName" maxlength="120"></label>
+        <label>HP penerima<input id="recipientPhone" maxlength="40"></label>
+        <label class="full">Alamat lengkap penerima<textarea id="recipientAddress" placeholder="Nama jalan, nomor rumah/gedung, RT/RW, patokan lokasi"></textarea></label>
+      </div>
+    </section>
+
+    <section class="card booking-card location-card">
+      <div class="booking-card-head">
+        <span class="step-number">03</span>
+        <div><small>VERIFIKASI GOOGLE MAPS + GPS</small><h2>Kunci Lokasi Tujuan</h2></div>
+      </div>
+      <p class="muted location-intro">Kelurahan tetap mengikuti Master Libra. GPS hanya mengunci titik penerima di dalam tujuan tersebut. Akurasi perangkat harus 200 meter atau lebih baik.</p>
+
+      <div class="location-lock-grid">
+        <div class="map-shell">
+          <div id="mapCanvas" class="map-canvas" role="img" aria-label="Peta titik tujuan">
+            <div id="mapPlaceholder" class="map-placeholder"><span>⌖</span><strong>Peta tujuan</strong><small>Pilih kelurahan lalu ambil GPS perangkat.</small></div>
+          </div>
+          <div class="map-legend"><span><i class="origin-dot"></i> Bandara Sentani (DJJ)</span><span><i class="destination-dot"></i> Titik penerima</span></div>
+        </div>
+
+        <div class="location-control-panel">
+          <div class="location-selected-mini"><small>KELURAHAN YANG HARUS DICOCOKKAN</small><strong id="gpsTargetArea">Belum dipilih</strong><span id="gpsTargetRegion">Pilih tujuan pada langkah 1.</span></div>
+          <button id="gpsBtn" type="button" class="gps-button">⌖ Ambil GPS Perangkat</button>
+          <div class="gps-metrics">
+            <div><small>Latitude</small><strong id="latDisplay">—</strong></div>
+            <div><small>Longitude</small><strong id="lngDisplay">—</strong></div>
+            <div><small>Akurasi</small><strong id="accuracyDisplay">—</strong></div>
+          </div>
+          <div class="google-detected"><small>ALAMAT TERDETEKSI GOOGLE</small><strong id="detectedAddress">Belum ada titik GPS.</strong><span id="areaMatchStatus">Kelurahan pilihan tetap menjadi acuan utama.</span></div>
+
+          <input id="lat" type="hidden">
+          <input id="lng" type="hidden">
+          <input id="accuracy" type="hidden">
+          <input id="confirmedArea" type="hidden">
+
+          <label class="confirm-location"><input id="confirmKel" type="checkbox"> <span>Saya mengonfirmasi <b id="confirmKelLabel">kelurahan tujuan</b> dan titik GPS penerima sudah benar.</span></label>
+          <div id="gpsStatus" class="status"></div>
+        </div>
+      </div>
+    </section>
+
+    <section class="card booking-card final-booking-card">
+      <div class="booking-card-head">
+        <span class="step-number">04</span>
+        <div><small>KONFIRMASI AKHIR</small><h2>Buat Booking</h2></div>
+      </div>
+      <p class="muted">Booking hanya dapat dibuat setelah quote APPROVED, kelurahan dipilih, dan GPS tujuan terkonfirmasi. Jika saldo kurang, booking disimpan sebagai menunggu top-up.</p>
+      <button id="bookingBtn" disabled>Buat Booking & Potong Saldo</button>
+      <div id="bookingStatus" class="status"></div>
+    </section>
+  </main>
+
+  <script src="booking.js?v=20260904-booking-map-1"></script>
+</body>
+</html>
