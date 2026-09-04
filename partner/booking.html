@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width,initial-scale=1">
   <meta name="robots" content="noindex,nofollow">
   <title>Manual Booking Partner | Libra</title>
-  <link rel="stylesheet" href="portal.css?v=20260904-booking-map-1">
+  <link rel="stylesheet" href="portal.css?v=20260904-booking-cascade-2">
 </head>
 <body class="booking-page">
   <header class="top">
@@ -20,10 +20,10 @@
       <div>
         <span class="booking-eyebrow">BOOKING DOORING & LAST-MILE</span>
         <h1>Manual Booking</h1>
-        <p>Tujuan wajib dikunci sampai tingkat <strong>Kelurahan/Kampung</strong> dari Master Libra. GPS digunakan untuk memverifikasi titik penerima agar tarif, SLA, dan penugasan kurir lebih presisi.</p>
+        <p>Pilih tujuan secara bertingkat dari <strong>Bandara Acuan</strong> sampai <strong>Kelurahan/Kampung</strong>. GPS digunakan untuk memverifikasi titik penerima agar tarif, SLA, dan penugasan kurir lebih presisi.</p>
       </div>
       <div class="booking-progress" aria-label="Tahapan booking">
-        <span><b>1</b> Kelurahan</span>
+        <span><b>1</b> Tujuan</span>
         <span><b>2</b> Quote</span>
         <span><b>3</b> GPS</span>
         <span><b>4</b> Booking</span>
@@ -36,12 +36,24 @@
         <div><small>TUJUAN WAJIB SPESIFIK</small><h2>Rute & Quote</h2></div>
       </div>
 
-      <div class="formgrid">
-        <label class="full destination-picker">Kelurahan / Kampung tujuan
-          <select id="route"><option value="">Memuat Master Rute…</option></select>
-          <span class="field-help">Pilih wilayah resmi dari Master Libra. Nama kota saja tidak dapat digunakan untuk booking.</span>
+      <div class="destination-cascade">
+        <label class="airport-field">Bandara Acuan
+          <select id="airport"><option value="">Memuat Master Rute…</option></select>
+        </label>
+        <label>Provinsi
+          <select id="province" disabled><option value="">Pilih provinsi</option></select>
+        </label>
+        <label>Kabupaten / Kota
+          <select id="city" disabled><option value="">Pilih kabupaten/kota</option></select>
+        </label>
+        <label>Kecamatan / Distrik
+          <select id="district" disabled><option value="">Pilih kecamatan/distrik</option></select>
+        </label>
+        <label>Kelurahan / Kampung
+          <select id="village" disabled><option value="">Pilih kelurahan/kampung</option></select>
         </label>
       </div>
+      <span class="field-help cascade-help">Pilihan berikutnya akan muncul otomatis sesuai wilayah sebelumnya. Kelurahan/Kampung adalah dasar tarif dan SLA.</span>
 
       <div id="destinationSummary" class="destination-summary hidden" aria-live="polite">
         <div class="destination-summary-head">
@@ -49,11 +61,13 @@
           <span id="selectedRouteCode" class="route-code">—</span>
         </div>
         <div class="destination-levels">
+          <div><small>Bandara Acuan</small><strong id="selectedAirport">—</strong></div>
+          <div><small>Provinsi</small><strong id="selectedProvince">—</strong></div>
           <div><small>Kabupaten / Kota</small><strong id="selectedCity">—</strong></div>
-          <div><small>Distrik</small><strong id="selectedDistrict">—</strong></div>
+          <div><small>Kecamatan / Distrik</small><strong id="selectedDistrict">—</strong></div>
           <div class="village-level"><small>Kelurahan / Kampung</small><strong id="selectedVillage">—</strong></div>
         </div>
-        <div class="destination-rule"><b>Kelurahan adalah dasar perhitungan.</b> Titik GPS pada langkah 3 harus dikonfirmasi sesuai wilayah ini.</div>
+        <div class="destination-rule"><b>Bandara acuan menentukan titik awal last-mile.</b> Kelurahan menentukan tujuan operasional, tarif, dan SLA.</div>
       </div>
 
       <div class="formgrid booking-quote-fields">
@@ -89,9 +103,9 @@
       <div class="location-lock-grid">
         <div class="map-shell">
           <div id="mapCanvas" class="map-canvas" role="img" aria-label="Peta titik tujuan">
-            <div id="mapPlaceholder" class="map-placeholder"><span>⌖</span><strong>Peta tujuan</strong><small>Pilih kelurahan lalu ambil GPS perangkat.</small></div>
+            <div id="mapPlaceholder" class="map-placeholder"><span>⌖</span><strong>Peta tujuan</strong><small>Pilih tujuan lalu ambil GPS perangkat.</small></div>
           </div>
-          <div class="map-legend"><span><i class="origin-dot"></i> Bandara Sentani (DJJ)</span><span><i class="destination-dot"></i> Titik penerima</span></div>
+          <div class="map-legend"><span><i class="origin-dot"></i> <b id="mapAirportLabel">Bandara acuan</b></span><span><i class="destination-dot"></i> Titik penerima</span></div>
         </div>
 
         <div class="location-control-panel">
@@ -126,6 +140,6 @@
     </section>
   </main>
 
-  <script src="booking.js?v=20260904-booking-map-1"></script>
+  <script src="booking.js?v=20260904-booking-cascade-2"></script>
 </body>
 </html>
