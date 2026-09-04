@@ -1,2 +1,2 @@
-export default request=>new Response(null,{status:302,headers:{location:new URL('/',request.url).toString(),'set-cookie':'libra_admin_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict','cache-control':'no-store'}});
+export default request=>{const headers=new Headers({location:new URL('/',request.url).toString(),'cache-control':'no-store'});headers.append('set-cookie','libra_admin_session=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict');headers.append('set-cookie','libra_admin_device=; Max-Age=0; Path=/; HttpOnly; Secure; SameSite=Strict');return new Response(null,{status:302,headers});};
 export const config={path:'/.netlify/functions/admin-logout'};
