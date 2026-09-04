@@ -8,6 +8,8 @@ const privateKey=v=>clean(v).replace(/\\n/g,'\n');
 
 export const PILOT_ROUTE_CODES=[
  'LM-DJJ-9103-01-1002','LM-DJJ-9103-01-1003','LM-DJJ-9103-01-1001',
+ 'LM-DJJ-9103-04-3006','LM-DJJ-9103-04-2001','LM-DJJ-9103-04-2005','LM-DJJ-9103-04-2011','LM-DJJ-9103-04-2008',
+ 'LM-DJJ-9103-02-2004','LM-DJJ-9103-02-3003','LM-DJJ-9103-02-3005','LM-DJJ-9103-02-3007','LM-DJJ-9103-02-2006','LM-DJJ-9103-02-2001','LM-DJJ-9103-02-2002',
  'LM-DJJ-9171-05-1001','LM-DJJ-9171-05-1002','LM-DJJ-9171-05-1004',
  'LM-DJJ-9171-03-1011','LM-DJJ-9171-03-1002','LM-DJJ-9171-03-1008','LM-DJJ-9171-03-1012','LM-DJJ-9171-03-1014','LM-DJJ-9171-03-1015','LM-DJJ-9171-03-1016','LM-DJJ-9171-03-1010',
  'LM-DJJ-9171-02-1002','LM-DJJ-9171-02-1001','LM-DJJ-9171-02-1005','LM-DJJ-9171-02-1006','LM-DJJ-9171-02-1003',
@@ -41,7 +43,7 @@ async function readPilotRows(token){
  return (body.values||[]).slice(1).map((row,i)=>({rowNumber:i+2,kodeRute:clean(row[0]),provinsi:clean(row[4]),kabupatenKota:clean(row[5]),distrik:clean(row[6]),kelurahan:clean(row[7]),kodeWilayah:clean(row[8]),query:clean(row[9])})).filter(r=>PILOT_SET.has(r.kodeRute));
 }
 
-function placeToken(v){return normalize(v).replace(/\b(kabupaten|kota|distrik|kecamatan|kelurahan|kampung|provinsi)\b/g,' ').replace(/\s+/g,' ').trim();}
+function placeToken(v){return normalize(v).replace(/\b(kabupaten|kota|distrik|kecamatan|kelurahan|kampung|provinsi|desa adat|desa)\b/g,' ').replace(/\s+/g,' ').trim();}
 function resultScore(result,row){
  const hay=normalize([result.formatted_address,...(result.address_components||[]).flatMap(c=>[c.long_name,c.short_name])].join(' '));
  const village=placeToken(row.kelurahan),district=placeToken(row.distrik),city=placeToken(row.kabupatenKota),province=placeToken(row.provinsi);
