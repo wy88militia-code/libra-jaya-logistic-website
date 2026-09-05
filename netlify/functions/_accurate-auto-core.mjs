@@ -127,7 +127,7 @@ function verifyJournalDetail(detail,payload,expectedBranchId=null){
  const expectedBranch=clean(payload?.branchName,160),branchOk=actualBranch?norm(actualBranch)===norm(expectedBranch):(expectedBranchId!==null&&expectedBranchId!==undefined&&actualBranchId!==null&&actualBranchId!==undefined?String(actualBranchId)===String(expectedBranchId):false);
  const expected=expectedLines(payload),actual=detailLines(detail),linesReadable=actual.length>0,linesOk=linesReadable&&expected.length===actual.length&&expected.every((v,i)=>v===actual[i]);
  const checks={number:actualNumber===clean(payload?.number,120),date:actualDate===expectedDate,branch:branchOk,lines:linesOk};
- return {verified:Object.values(checks).every(Boolean),checks,actual:{number:actualNumber,date:actualDate,branchName:actualBranch||null,branchId:actualBranchId,lines},expected:{number:clean(payload?.number,120),date:expectedDate,branchName:expectedBranch,branchId:expectedBranchId,lines:expected}};
+ return {verified:Object.values(checks).every(Boolean),checks,actual:{number:actualNumber,date:actualDate,branchName:actualBranch||null,branchId:actualBranchId,lines:actual},expected:{number:clean(payload?.number,120),date:expectedDate,branchName:expectedBranch,branchId:expectedBranchId,lines:expected}};
 }
 
 async function findJournalByNumber(accurate,number){
@@ -200,6 +200,21 @@ async function processTransaction(tx){
   if(job?.status==='POST_FAILED')return saveMarker(tx,'POST_FAILED',{jobId:job.jobId,journalNumber:job.journalNumber,reason:clean(job.lastError||error?.message||error,500)});
   const old=await loadMarker(tx.transactionId),attempts=Math.min(10,Number(old?.attempts||0)+1);return saveMarker(tx,'RETRY',{jobId:job?.jobId||null,journalNumber:job?.journalNumber||null,attempts,reason:clean(error?.message||error,500)});
  }
+}
+
+export async function reconcileAccurateAutoEvent(transactionId){
+ const marker=await loadMarker(transactionId);if(!marker)throw new Error('Auto event tidak ditemukan.');
+ if(marker.status==='POSTED')return {ok:true,status:'POSTED',alreadyVerified:Boolean(marker.readBackVerified),marker};
+ if(marker.status!=='RECONCILE_REQUIRED')throw new Error(`Auto event harus RECONCILE_REQUIRED, sekarang ${marker.status||'-'}.`);
+ const accurate=await import('./_accurate-core.mjs'),job=await accurate.getAccurateJob(marker.jobId);if(!job)throw new Error('Auto job reconcile tidak ditemukan.');
+ const readiness=await accurate.verifyAccurateProductionReadiness(),payload=accurate.buildAccurateJournalPayload(job);
+ let lookup;try{lookup=await lookupJournalVerification(accurate,payload,job.productionBranchId??readiness.branch.id,job.accurateId);}catch(error){const reason=`Verifikasi ulang read-back gagal: ${clean(error?.message||error,400)}`;await updateAutoJob(job,{status:'RECONCILE_REQUIRED',readBackCheckedAt:now(),lastError:reason});return {ok:false,status:'RECONCILE_REQUIRED',reason};}
+ if(!lookup.found){const reason=`Journal Voucher ${job.journalNumber} belum ditemukan di Accurate. Tidak ada POST baru.`;await updateAutoJob(job,{status:'RECONCILE_REQUIRED',readBackCheckedAt:now(),lastError:reason});return {ok:false,status:'RECONCILE_REQUIRED',reason};}
+ if(!lookup.verified){const failed=Object.entries(lookup.verification?.checks||{}).filter(([,v])=>!v).map(([k])=>k),reason=`Journal Voucher ditemukan tetapi read-back belum identik${failed.length?`: ${failed.join(', ')}`:''}. Tidak ada POST baru.`;await updateAutoJob(job,{status:'RECONCILE_REQUIRED',readBackCheckedAt:now(),readBackDigest:digest(lookup.verification),lastError:reason});return {ok:false,status:'RECONCILE_REQUIRED',reason,verification:lookup.verification};}
+ const verifiedAt=now(),verified=await updateAutoJob(job,{status:'POSTED',postedAt:job.postedAt||verifiedAt,readBackVerified:true,readBackVerifiedAt:verifiedAt,readBackDigest:digest(lookup.verification),accurateId:lookup.detail?.id??job.accurateId??null,accurateReference:clean(lookup.detail?.number||lookup.detail?.no||job.accurateReference||job.journalNumber,120),lastError:null});
+ const tx={transactionId:marker.transactionId,partnerId:marker.partnerId,source:marker.source,reference:marker.reference,signedAmount:marker.amount,createdAt:marker.createdAt};
+ const saved=await saveMarker(tx,'POSTED',{jobId:verified.jobId,journalNumber:verified.journalNumber,postedAt:verified.postedAt||verifiedAt,accurateId:verified.accurateId??null,branchName:verified.productionBranchName||branchName(),duplicatePrevented:true,readBackVerified:true,readBackVerifiedAt:verifiedAt});
+ return {ok:true,status:'POSTED',journalNumber:verified.journalNumber,verification:lookup.verification,marker:saved};
 }
 
 export async function runAccurateAutoSync({limit=60}={}){
