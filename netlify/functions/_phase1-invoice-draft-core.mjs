@@ -1,6 +1,7 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { getBooking, getBookingWithMetadata, saveBooking } from './_booking-core.mjs';
+import { getPartner } from './_partner-core.mjs';
 import { getPhase1FinalPriceLock } from './_phase1-price-lock-core.mjs';
 import { writeAdminAudit } from './_admin-audit-core.mjs';
 
@@ -12,7 +13,10 @@ const now=()=>new Date().toISOString();
 const sha=v=>crypto.createHash('sha256').update(String(v)).digest('hex');
 function canonical(value){if(Array.isArray(value))return `[${value.map(canonical).join(',')}]`;if(value&&typeof value==='object')return `{${Object.keys(value).sort().map(k=>`${JSON.stringify(k)}:${canonical(value[k])}`).join(',')}}`;return JSON.stringify(value);}
 function draftFingerprint(payload){return sha(canonical(payload));}
-function payerFromBooking(booking={}){return booking.partnerId?{type:'PARTNER',partnerId:booking.partnerId,name:clean(booking.partnerName||booking.sender?.name,160)||booking.partnerId,phone:clean(booking.sender?.phone,60)||null,address:clean(booking.sender?.address,500)||null}:{type:'DIRECT_CUSTOMER',partnerId:null,name:clean(booking.sender?.name,160)||'Customer',phone:clean(booking.sender?.phone,60)||null,address:clean(booking.sender?.address,500)||null};}
+function payerFromBooking(booking={},partner=null){
+  if(booking.partnerId)return {type:'PARTNER',partnerId:booking.partnerId,name:clean(partner?.companyName||partner?.name||booking.partnerName||booking.sender?.name,160)||booking.partnerId,phone:clean(partner?.phone||partner?.picPhone||booking.sender?.phone,60)||null,address:clean(partner?.address||booking.sender?.address,500)||null};
+  return {type:'DIRECT_CUSTOMER',partnerId:null,name:clean(booking.sender?.name,160)||'Customer',phone:clean(booking.sender?.phone,60)||null,address:clean(booking.sender?.address,500)||null};
+}
 function invoiceLines(lock){
   const s=lock?.selling||{},lines=[];
   if(money(s.ptpFreight)>0)lines.push({code:'PTP_CGK_DJJ',description:`Freight ${lock.serviceCode||'PTD'} CGK → DJJ`,qty:Number(lock.customerChargeableKg||0),unit:'kg',rate:money(s.ptpSellRatePerKg),amount:money(s.ptpFreight)});
@@ -28,16 +32,17 @@ export async function preparePhase1InvoiceDraft({bookingId,session,request}={}){
   const [entry,lock]=await Promise.all([getBookingWithMetadata(id),getPhase1FinalPriceLock(id)]),booking=entry?.data;if(!booking)throw new Error('Booking tidak ditemukan.');if(!lock||lock.status!=='LOCKED')throw new Error('Harga final belum terkunci. Draft invoice tidak dapat dibuat.');
   if(String(booking.pricingStatus||'').toUpperCase()!=='FINAL_PRICE_LOCKED')throw new Error(`Pricing status booking ${booking.pricingStatus||'-'} belum FINAL_PRICE_LOCKED.`);
   if(String(booking.billingStatus||'').toUpperCase()==='INVOICED')throw new Error('Booking sudah berstatus INVOICED; draft baru tidak boleh dibuat.');
+  const partner=booking.partnerId?await getPartner(booking.partnerId):null;if(booking.partnerId&&!partner)throw new Error('Partner payer tidak ditemukan; draft invoice diblokir agar tidak menagih pihak yang salah.');
   const lines=invoiceLines(lock),subtotal=lines.reduce((s,x)=>s+money(x.amount),0),lockedTotal=money(lock.selling?.total);
   if(!(lockedTotal>0))throw new Error('Total harga terkunci tidak valid.');if(subtotal!==lockedTotal)throw new Error(`Invoice line mismatch: subtotal Rp${subtotal.toLocaleString('id-ID')} tidak sama dengan locked total Rp${lockedTotal.toLocaleString('id-ID')}.`);
-  const payload={bookingId:id,lockId:lock.lockId,lockFingerprint:lock.fingerprint,payer:payerFromBooking(booking),serviceCode:lock.serviceCode,routeCode:lock.routeCode,customerChargeableKg:lock.customerChargeableKg,lines,subtotal,total:lockedTotal,currency:'IDR',taxPostingStatus:'NOT_POSTED',accurateStatus:'NOT_POSTED'};
+  const payload={bookingId:id,lockId:lock.lockId,lockFingerprint:lock.fingerprint,payer:payerFromBooking(booking,partner),serviceCode:lock.serviceCode,routeCode:lock.routeCode,customerChargeableKg:lock.customerChargeableKg,lines,subtotal,total:lockedTotal,currency:'IDR',taxPostingStatus:'NOT_POSTED',accurateStatus:'NOT_POSTED'};
   const fp=draftFingerprint(payload),key=`draft/${id}/${fp}`,existing=await store().get(key,{type:'json',consistency:'strong'});if(existing)return {draft:existing,booking,idempotent:true};
   const createdAt=now(),draftId=`P1INV-DRAFT-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,draft={draftId,...payload,fingerprint:fp,status:'DRAFT',createdAt,createdBy:clean(session.username,100),note:'Dokumen internal pra-invoice. Belum Sales Invoice Accurate, belum debit wallet, belum bukti pajak.'};
   const savedDraft=await store().setJSON(key,draft,{onlyIfNew:true});if(!savedDraft.modified){const row=await store().get(key,{type:'json',consistency:'strong'});return {draft:row,booking,idempotent:true};}
   const next={...booking,billingStatus:'INVOICE_DRAFT_READY',invoiceDraftId:draftId,invoiceDraftFingerprint:fp,financeGate:{...(booking.financeGate||{}),status:'INVOICE_DRAFT_READY',autoPost:false,reason:'DRAFT_READY_WAIT_FINANCE_ISSUE'},updatedAt:createdAt};
   const savedBooking=await saveBooking(next,{onlyIfMatch:entry.etag});if(!savedBooking.modified){await store().setJSON(key,{...draft,status:'ORPHANED_BOOKING_CONFLICT',orphanedAt:now()}).catch(()=>{});throw new Error('Booking berubah saat draft dibuat. Draft ditandai ORPHANED; refresh dan ulangi.');}
   await store().setJSON(`latest/${id}`,{draftId,fingerprint:fp,key,status:'DRAFT',createdAt,createdBy:draft.createdBy});
-  await writeAdminAudit({session,request,action:'PHASE1_INVOICE_DRAFT_PREPARE',entityType:'BOOKING',entityId:id,before:{billingStatus:booking.billingStatus,invoiceDraftId:booking.invoiceDraftId||null},after:{billingStatus:next.billingStatus,invoiceDraftId:draftId,invoiceDraftFingerprint:fp,total:lockedTotal},note:'Draft invoice Tahap 1 dibuat dari immutable final price lock. Tidak ada posting wallet/Accurate.',metadata:{lockId:lock.lockId,lockFingerprint:lock.fingerprint,lineCount:lines.length,total:lockedTotal}});
+  await writeAdminAudit({session,request,action:'PHASE1_INVOICE_DRAFT_PREPARE',entityType:'BOOKING',entityId:id,before:{billingStatus:booking.billingStatus,invoiceDraftId:booking.invoiceDraftId||null},after:{billingStatus:next.billingStatus,invoiceDraftId:draftId,invoiceDraftFingerprint:fp,total:lockedTotal},note:'Draft invoice Tahap 1 dibuat dari immutable final price lock. Tidak ada posting wallet/Accurate.',metadata:{lockId:lock.lockId,lockFingerprint:lock.fingerprint,lineCount:lines.length,total:lockedTotal,payerType:payload.payer.type,partnerId:payload.payer.partnerId||null}});
   return {draft,booking:next,idempotent:false};
 }
 
