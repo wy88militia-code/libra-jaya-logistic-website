@@ -1,7 +1,7 @@
 import { getAdminSession } from './_partner-core.mjs';
 import { buildPhase1NativeSiReadiness } from './_accurate-native-si-core.mjs';
 
-const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const rup=v=>v===null||v===undefined?'—':`Rp${Math.round(Number(v)||0).toLocaleString('id-ID')}`;
 const json=v=>esc(JSON.stringify(v,null,2));
 
