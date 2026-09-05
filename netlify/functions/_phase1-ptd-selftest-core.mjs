@@ -1,6 +1,7 @@
 import { allocateOperationalCosts } from './_smu-cost-allocation-core.mjs';
 import { calculatePhase1PtpVendorBatchCost, phase1CustomerChargeableKg, resolveAirlinePtpCostPolicy } from './_phase1-ptd-core.mjs';
 import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, resolveDjjLastmileWeightBasis } from './_djj-lastmile-engine.mjs';
+import { allocateFinanceIncomingHandling } from './_finance-smu-handling-core.mjs';
 import { calculateRateAmount } from './_rate-plan-core.mjs';
 
 function assert(name,condition,detail){if(!condition){const e=new Error(`${name}: ${detail}`);e.check=name;throw e;}return {name,status:'PASS',detail};}
@@ -40,5 +41,20 @@ export function runPhase1PtdSelfTest(){
   checks.push(assert('LASTMILE_ROUTE_NO_HIDDEN_25K',lastmileQuote?.handlingFee===0&&lastmileQuote?.totalAmount===35000,'Tarif rute 5 kg × Rp7.000 = Rp35.000 tanpa Rp25.000 incoming disisipkan per booking.'));
   checks.push(assert('DJJ_ENGINE_NO_SENTANI_REPRICE',DJJ_LASTMILE_ENGINE.billingPolicy.sentaniPhysicalCheckMayRepriceCustomer===false,'DJJ_LASTMILE_V1 mengunci Sentani physical check sebagai audit/incident evidence, bukan sumber repricing customer.'));
 
-  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0},testedAt:new Date().toISOString()};
+  const sharedFinanceMap=new Map([
+    ['ROUTE-SENTANI',{smuNumber:'SMU-SHARED-FIN',smuNumbers:['SMU-SHARED-FIN']}],
+    ['ROUTE-WAENA',{smuNumber:'SMU-SHARED-FIN',smuNumbers:['SMU-SHARED-FIN']}],
+  ]);
+  const financeShared=allocateFinanceIncomingHandling([
+    {bookingId:'ROUTE-SENTANI',serviceType:'PTD',requiresLastmile:true,chargeableWeightKg:4},
+    {bookingId:'ROUTE-WAENA',serviceType:'PTD',requiresLastmile:true,chargeableWeightKg:6},
+  ],sharedFinanceMap);
+  checks.push(assert('FINANCE_GLOBAL_UNIQUE_SMU',financeShared.smuCount===1&&financeShared.total===25000,'Shared SMU lintas dua rute tetap total handling Finance Rp25.000.'));
+  checks.push(assert('FINANCE_GLOBAL_ALLOCATION_SUM',Number(financeShared.bookingMap.get('ROUTE-SENTANI')||0)+Number(financeShared.bookingMap.get('ROUTE-WAENA')||0)===25000,'Alokasi dua rute dijumlahkan kembali tepat Rp25.000, tidak dobel.'));
+  const multiSmu=allocateFinanceIncomingHandling([{bookingId:'MULTI-SMU',serviceType:'PTD',requiresLastmile:true,chargeableWeightKg:10}],new Map([['MULTI-SMU',{smuNumbers:['SMU-A','SMU-B']}]]));
+  checks.push(assert('FINANCE_MULTI_SMU_COUNT',multiSmu.smuCount===2&&multiSmu.total===50000&&Number(multiSmu.bookingMap.get('MULTI-SMU'))===50000,'Satu booking dengan dua SMU menghitung 2 × Rp25.000 = Rp50.000.'));
+  const ptpOnly=allocateFinanceIncomingHandling([{bookingId:'PTP-ONLY',serviceType:'PTP',requiresLastmile:false,chargeableWeightKg:20}],new Map([['PTP-ONLY',{smuNumbers:['SMU-PTP']}]]));
+  checks.push(assert('FINANCE_PTP_EXCLUDED',ptpOnly.smuCount===0&&ptpOnly.total===0,'Booking PTP-only tidak terkena handling incoming last-mile.'));
+
+  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
 }
