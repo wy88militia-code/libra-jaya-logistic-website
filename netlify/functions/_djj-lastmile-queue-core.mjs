@@ -30,6 +30,7 @@ function stageFor({booking,channel,assignment,warehouse,reconciliation}){
   if(tracking==='OUT_FOR_DELIVERY')return {code:'OUT_FOR_DELIVERY',label:'Out for Delivery',tone:'blue',ready:false};
   if(channel==='JLX_INTERNAL'){
     if(!DELIVERY_PROGRESS.has(tracking))return {code:'WAITING_FLIGHT',label:'Menunggu Arrival DJJ',tone:'neutral',ready:false};
+    if(!warehouseAtDjj(warehouse))return {code:'WAITING_HUB_RECEIPT',label:'Arrival • Menunggu Scan Hub DJJ',tone:'warn',ready:false};
     if(assignment&&upper(assignment.status)!=='COMPLETED')return {code:'ASSIGNED',label:'Kurir Ter-assign',tone:'blue',ready:false};
     return {code:'READY_ASSIGNMENT',label:'Siap Assign Kurir',tone:'good',ready:true};
   }
