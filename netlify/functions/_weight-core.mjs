@@ -2,6 +2,7 @@ import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
 import { getBooking } from './_booking-core.mjs';
 import { classifyOutgoingWeight, LOGISTICS_RULE_VERSION } from './_logistics-rule-core.mjs';
+import { createOperationalNotification } from './_notification-core.mjs';
 
 const STORE='libra-weights';
 const MANIFEST_STORE='libra-manifests';
@@ -47,7 +48,9 @@ export async function recordReweigh(input={},actor='admin'){
  const billingReviewStatus=billingReviewRequired?'REQUIRED':'NONE';
  const reweighCount=Number(prev?.reweighCount||0)+1;
  const t=now(),record={bookingId,declaredWeightKg,customerDeclaredWeightKg:declaredWeightKg,actualWeightKg:kg(actual),libraActualWeightKg:kg(actual),volumetricWeightKg,libraVolumeWeightKg:volumetricWeightKg,chargeableWeightKg,libraFinalChargeableWeightKg:chargeableWeightKg,weightBasis:'LIBRA_VERIFIED',weightDeltaKg:weightDecision.weightDeltaKg,weightStatus:weightDecision.weightStatus,customerReapprovalRequired:weightDecision.customerReapprovalRequired,weightClearThresholdKg:weightDecision.thresholdKg,ruleVersion:LOGISTICS_RULE_VERSION,billingVarianceKg,packageCount,lengthCm:num(input.lengthCm),widthCm:num(input.widthCm),heightCm:num(input.heightCm),volumetricDivisor,varianceKg,variancePct,reweighCount,scaleId,reason:reason||null,status:'VERIFIED',billingReviewRequired,billingReviewStatus,billingAdjustmentApplied:false,manifestLock:manifest||null,createdAt:prev?.createdAt||t,createdBy:prev?.createdBy||clean(actor,100),updatedAt:t,updatedBy:clean(actor,100)};
- const result=await store().setJSON(key(bookingId),record,previous?.etag?{onlyIfMatch:previous.etag}:{onlyIfNew:true});if(!result.modified)throw new Error('Data timbang berubah di proses lain. Refresh lalu coba lagi.');await appendEvent(record,{type:prev?'REWEIGH_RECORDED':'WEIGHT_VERIFIED',actor,actualWeightKg:record.actualWeightKg,volumetricWeightKg,chargeableWeightKg,reason:record.reason,scaleId:record.scaleId});return record;
+ const result=await store().setJSON(key(bookingId),record,previous?.etag?{onlyIfMatch:previous.etag}:{onlyIfNew:true});if(!result.modified)throw new Error('Data timbang berubah di proses lain. Refresh lalu coba lagi.');await appendEvent(record,{type:prev?'REWEIGH_RECORDED':'WEIGHT_VERIFIED',actor,actualWeightKg:record.actualWeightKg,volumetricWeightKg,chargeableWeightKg,reason:record.reason,scaleId:record.scaleId});
+ if(billingReviewRequired&&booking.partnerId){try{await createOperationalNotification({partnerId:booking.partnerId,type:'WEIGHT_ADJUSTMENT_APPROVAL_REQUIRED',severity:'WARNING',title:'Konfirmasi berat final diperlukan',message:`Booking ${bookingId}: berat booking ${declaredWeightKg.toFixed(2)} kg, final Libra ${chargeableWeightKg.toFixed(2)} kg, selisih ${weightDecision.weightDeltaKg.toFixed(2)} kg. Persetujuan diperlukan sebelum kiriman dilanjutkan.`,reference:bookingId,partnerLink:`/partner/weight-approval?booking=${encodeURIComponent(bookingId)}`,adminLink:`/admin-weights?booking=${encodeURIComponent(bookingId)}`,dedupeKey:`weight-approval:${bookingId}:${record.updatedAt}`,metadata:{bookingId,declaredWeightKg,finalChargeableWeightKg:chargeableWeightKg,weightDeltaKg:weightDecision.weightDeltaKg,reweighCount,ruleVersion:LOGISTICS_RULE_VERSION}});}catch{}}
+ return record;
 }
 
 export async function listWeightEvents(id,limit=200){const {blobs}=await store().list({prefix:`event/${clean(id,120)}/`}),rows=[];for(const b of blobs.sort((a,b)=>a.key.localeCompare(b.key)).slice(-Math.min(limit,500))){const r=await store().get(b.key,{type:'json'});if(r)rows.push(r);}return rows;}
