@@ -33,7 +33,7 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   if(manifest&&['OPEN','CLOSED'].includes(manifestStatus))return {code:'SMU',label:'SMU / Manifest',rank:5,tone:'blue',nextLabel:'Kelola SMU',nextHref:'/admin-manifests'};
   if(weight?.status==='VERIFIED'){
     if(weightStatus==='WEIGHT_ADJUSTMENT'||weight?.billingReviewRequired)return {code:'WEIGHT_ADJUSTMENT',label:'Perlu Approval Berat',rank:3,tone:'warn',nextLabel:'Review Timbang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
-    if(!hasFinalPrice(booking))return {code:'FINAL_PRICING',label:'Menunggu Harga Final',rank:4,tone:'warn',nextLabel:'Cek Berat Final',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
+    if(!hasFinalPrice(booking))return {code:'FINAL_PRICING',label:'Menunggu Harga Final',rank:4,tone:'warn',nextLabel:'Cek Harga Final',nextHref:`/jlx-soetta/pricing?booking=${encodeURIComponent(booking.bookingId)}`};
     return {code:'SIAP_FAKTUR',label:'Siap Faktur',rank:4,tone:'good',nextLabel:'Data Faktur Siap',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
   }
   if(warehouse&&['INBOUND','STORED','HOLD','DAMAGED'].includes(warehouseStatus))return {code:'GUDANG',label:warehouseStatus==='INBOUND'?'Terima Gudang':'Gudang Transit',rank:2,tone:warehouseStatus==='HOLD'||warehouseStatus==='DAMAGED'?'bad':'blue',nextLabel:'Timbang Barang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
