@@ -3,7 +3,7 @@ import { accurateGet } from './_accurate-core.mjs';
 import { getBooking } from './_booking-core.mjs';
 import { buildPhase1NativeSiReadiness } from './_accurate-native-si-core.mjs';
 import { getPhase1InvoiceDraft } from './_phase1-invoice-draft-core.mjs';
-import { getWallet } from './_partner-core.mjs';
+import { getWallet, listWalletTransactions } from './_partner-core.mjs';
 
 const clean=(v,n=500)=>String(v??'').trim().slice(0,n);
 const money=v=>Number.isFinite(Number(v))?Math.round(Number(v)):null;
@@ -21,11 +21,19 @@ async function listDpCandidates(customerNo){
   }
 }
 async function readCandidateDetail(row){const id=row?.id??null,number=clean(row?.number||row?.no,120);if(id===null||id===undefined)return {id:null,number,error:'ID Sales Down Payment candidate tidak tersedia.',signals:[],rawDigest:null};try{const {data}=await accurateGet('sales-invoice','detail',{id}),detail=data?.d||data?.r||data||{},signals=dpSignals(detail);return {id,number:clean(detail?.number||detail?.no||number,120),customerNo:clean(detail?.customerNo||detail?.customer?.no,120)||null,invoiceDp:detail?.invoiceDp===true||String(detail?.invoiceDp||'').toLowerCase()==='true',inputDownPayment:money(detail?.inputDownPayment),signals,rawDigest:sha(detail),error:null};}catch(error){return {id,number,error:clean(error?.message||error,700),signals:[],rawDigest:null};}}
+function walletLedgerSummary(wallet,rows=[]){
+  const processedRefCount=Object.keys(wallet?.processedRefs||{}).length,ledgerCount=rows.length,completeByReferenceCount=processedRefCount<=1000&&ledgerCount===processedRefCount,signedTotal=rows.reduce((s,x)=>s+Math.trunc(Number(x?.signedAmount)||0),0),balance=Math.trunc(Number(wallet?.balance)||0),sourceTotals={};
+  for(const row of rows){const source=clean(row?.source||'UNKNOWN',80).toUpperCase(),signed=Math.trunc(Number(row?.signedAmount)||0);if(!sourceTotals[source])sourceTotals[source]={source,credits:0,debits:0,net:0,count:0};const item=sourceTotals[source];item.count+=1;item.net+=signed;if(signed>0)item.credits+=signed;else item.debits+=Math.abs(signed);}
+  const sources=Object.values(sourceTotals).sort((a,b)=>Math.abs(b.net)-Math.abs(a.net));
+  return {processedRefCount,ledgerCount,ledgerLimit:1000,completeByReferenceCount,signedTotal,balance,balanceMatchesLedger:completeByReferenceCount&&signedTotal===balance,sourceTotals:sources,recent:rows.slice(0,30).map(x=>({transactionId:x.transactionId,createdAt:x.createdAt,source:x.source,reference:x.reference,direction:x.direction,amount:x.amount,signedAmount:x.signedAmount,balanceAfter:x.balanceAfter}))};
+}
 
 export async function buildPartnerDepositBridgeAudit(bookingId){
   const id=clean(bookingId,120);if(!id)throw new Error('Booking ID wajib.');
   const [booking,draft,native]=await Promise.all([getBooking(id),getPhase1InvoiceDraft(id),buildPhase1NativeSiReadiness(id)]);if(!booking)throw new Error('Booking tidak ditemukan.');if(!booking.partnerId)throw new Error('Audit Partner Deposit hanya untuk booking dengan partnerId.');if(!draft)throw new Error('Draft invoice Tahap 1 belum tersedia.');
-  const wallet=await getWallet(booking.partnerId),customerNo=clean(native?.customerResolution?.matched?.no||native?.payloadPreview?.customerNo,120),reasons=[];
+  const [wallet,ledgerRows]=await Promise.all([getWallet(booking.partnerId),listWalletTransactions(booking.partnerId,1000)]),ledger=walletLedgerSummary(wallet,ledgerRows),customerNo=clean(native?.customerResolution?.matched?.no||native?.payloadPreview?.customerNo,120),reasons=[];
+  if(!ledger.completeByReferenceCount)reasons.push({code:'LOCAL_WALLET_LEDGER_NOT_FULLY_ENUMERATED',message:`Ledger yang dibaca ${ledger.ledgerCount} transaksi, processedRefs ${ledger.processedRefCount}. Audit tidak mengklaim ledger lokal lengkap.`});
+  else if(!ledger.balanceMatchesLedger)reasons.push({code:'LOCAL_WALLET_BALANCE_MISMATCH',message:`Jumlah signed ledger Rp${ledger.signedTotal.toLocaleString('id-ID')} tidak sama dengan balance Rp${ledger.balance.toLocaleString('id-ID')}. Bridge diblokir.`});
   if(!customerNo)reasons.push({code:'ACCURATE_CUSTOMER_MAPPING_REQUIRED',message:'Customer Accurate partner belum ter-mapping exact.'});
   let listed={rows:[],queryMode:'NOT_RUN',fallback:false,error:null},candidates=[];
   if(customerNo){listed=await listDpCandidates(customerNo);if(listed.error&&listed.queryMode==='FAILED')reasons.push({code:'ACCURATE_DOWNPAYMENT_QUERY_FAILED',message:listed.error});for(const row of listed.rows.slice(0,50))candidates.push(await readCandidateDetail(row));}
@@ -36,9 +44,9 @@ export async function buildPartnerDepositBridgeAudit(bookingId){
   const walletBalance=Math.max(0,Math.trunc(Number(wallet?.balance)||0)),invoiceAmount=Math.max(0,Math.trunc(Number(draft.total)||0));
   return {
     bookingId:id,partnerId:booking.partnerId,customerNo:customerNo||null,bridgeReady:false,status:'BLOCKED_READ_ONLY_AUDIT',reasons,
-    localWallet:{balance:walletBalance,sufficientForInvoice:walletBalance>=invoiceAmount,updatedAt:wallet?.updatedAt||null},invoice:{draftId:draft.draftId,draftFingerprint:draft.fingerprint,amount:invoiceAmount},
+    localWallet:{balance:walletBalance,sufficientForInvoice:walletBalance>=invoiceAmount,updatedAt:wallet?.updatedAt||null,ledger},invoice:{draftId:draft.draftId,draftFingerprint:draft.fingerprint,amount:invoiceAmount},
     accurateDownPayment:{queryMode:listed.queryMode,queryFallback:Boolean(listed.fallback),queryWarning:listed.error||null,candidateCount:candidates.length,candidates,originalInputDownPaymentTotal:originalInputTotal,availableAmountReadable,availableAmount,doNotEquateOriginalInputWithAvailable:true},
-    reconciliation:{walletBalance,invoiceAmount,availableDpAmount:availableAmount,nominalComparable:false,provenanceVerified:false,automaticMigrationAllowed:false,salesReceiptFallbackForbidden:true},
+    reconciliation:{walletBalance,invoiceAmount,availableDpAmount:availableAmount,localLedgerVerified:Boolean(ledger.completeByReferenceCount&&ledger.balanceMatchesLedger),nominalComparable:false,provenanceVerified:false,automaticMigrationAllowed:false,salesReceiptFallbackForbidden:true},
     guard:'READ_ONLY_NO_ACCURATE_WRITE_NO_WALLET_MUTATION',checkedAt:now(),
   };
 }
