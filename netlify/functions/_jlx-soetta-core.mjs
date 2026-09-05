@@ -26,6 +26,8 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   const warehouseStatus=String(warehouse?.status||'').toUpperCase();
   const assignmentStatus=String(assignment?.status||'').toUpperCase();
   const weightStatus=String(weight?.weightStatus||'').toUpperCase();
+  const pricingStatus=String(booking?.pricingStatus||'').toUpperCase();
+  const billingStatus=String(booking?.billingStatus||'').toUpperCase();
   const pickupRequired=booking?.requiresPickup!==false;
 
   if(PAYMENT_BLOCKED.has(bookingStatus))return {code:'BLOCKED',label:'Tertahan Pembayaran',rank:0,tone:'bad',nextLabel:'Cek pembayaran',nextHref:'/admin-finance-billing'};
@@ -34,7 +36,8 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   if(weight?.status==='VERIFIED'){
     if(weightStatus==='WEIGHT_ADJUSTMENT'||weight?.billingReviewRequired)return {code:'WEIGHT_ADJUSTMENT',label:'Perlu Approval Berat',rank:3,tone:'warn',nextLabel:'Review Timbang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
     if(!hasFinalPrice(booking))return {code:'FINAL_PRICING',label:'Menunggu Harga Final',rank:4,tone:'warn',nextLabel:'Cek Harga Final',nextHref:`/jlx-soetta/pricing?booking=${encodeURIComponent(booking.bookingId)}`};
-    return {code:'SIAP_FAKTUR',label:'Siap Faktur',rank:4,tone:'good',nextLabel:'Data Faktur Siap',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
+    if(pricingStatus==='FINAL_PRICE_LOCKED'&&['READY_TO_INVOICE','INVOICE_DRAFT_READY'].includes(billingStatus))return {code:'SIAP_FAKTUR',label:billingStatus==='INVOICE_DRAFT_READY'?'Draft Faktur Siap':'Siap Faktur',rank:4,tone:'good',nextLabel:billingStatus==='INVOICE_DRAFT_READY'?'Lihat Draft Invoice':'Siapkan Draft Invoice',nextHref:`/jlx-soetta/invoice?booking=${encodeURIComponent(booking.bookingId)}`};
+    return {code:'SIAP_FAKTUR',label:'Siap Faktur',rank:4,tone:'good',nextLabel:'Cek Invoice',nextHref:`/jlx-soetta/invoice?booking=${encodeURIComponent(booking.bookingId)}`};
   }
   if(warehouse&&['INBOUND','STORED','HOLD','DAMAGED'].includes(warehouseStatus))return {code:'GUDANG',label:warehouseStatus==='INBOUND'?'Terima Gudang':'Gudang Transit',rank:2,tone:warehouseStatus==='HOLD'||warehouseStatus==='DAMAGED'?'bad':'blue',nextLabel:'Timbang Barang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
   if(['PICKED_UP','AT_ORIGIN_HUB'].includes(tracking)||['IN_CUSTODY','AT_HUB','HANDOVER_PENDING'].includes(assignmentStatus))return {code:'MENUJU_GUDANG',label:'Menuju Gudang',rank:2,tone:'blue',nextLabel:'Terima Gudang',nextHref:`/admin-warehouse?booking=${encodeURIComponent(booking.bookingId)}`};
