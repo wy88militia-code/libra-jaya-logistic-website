@@ -3,7 +3,7 @@ import { listAssignments } from './_courier-custody-core.mjs';
 import { listWarehouseShipments } from './_warehouse-core.mjs';
 import { getMasterSnapshot } from './_master-sheet-core.mjs';
 import { getBookingSmuManifest, getBookingSmuReconciliation } from './_smu-core.mjs';
-import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, djjLastmileMetadata } from './_djj-lastmile-engine.mjs';
+import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, djjLastmileMetadata, resolveDjjLastmileWeightBasis } from './_djj-lastmile-engine.mjs';
 
 const INCIDENTS=new Set(['HELD','DAMAGED','LOST','MIXED_UP','CLAIM_PROCESS']);
 const DELIVERY_PROGRESS=new Set(['ARRIVED_DESTINATION','OUT_FOR_DELIVERY','DELIVERED']);
@@ -53,9 +53,8 @@ export async function buildDjjLastmileQueue(limit=500){
     const channel=sourceChannel(booking);if(!channel||booking.uat)continue;
     const route=routes.get(String(booking.kodeRute||''))||null;if(!route||!isDjjLastmileRoute(route))continue;
     const [manifest,reconciliation]=channel==='PARTNER_API'?await Promise.all([getBookingSmuManifest(booking.bookingId),getBookingSmuReconciliation(booking.bookingId)]):[null,null];
-    const assignment=assignmentsByBooking.get(String(booking.bookingId))||null,warehouse=warehouseByBooking.get(String(booking.bookingId))||null,stage=stageFor({booking,channel,assignment,warehouse,reconciliation});
-    const basisWeightKg=channel==='PARTNER_API'?num(booking.smuTotalWeightKg||booking.weightKg):num(booking.chargeableWeightKg||booking.weightKg);
-    rows.push({booking,channel,engine:djjLastmileMetadata(channel),route,assignment,warehouse,smuManifest:manifest,reconciliation,stage,basisWeightKg,weightBasis:channel==='PARTNER_API'?'PARTNER_PTI':'JLX_UPSTREAM_FINAL_ARRIVAL',routeRateReferencePerKg:num(route.tarifRekomKg),routeFloorPerKg:num(route.tarifFloorKg),routeFullCostTrip:num(route.fullCostTrip),sla:route.slaTotalHub||route.slaLastmile||route.slaMaster||null});
+    const assignment=assignmentsByBooking.get(String(booking.bookingId))||null,warehouse=warehouseByBooking.get(String(booking.bookingId))||null,stage=stageFor({booking,channel,assignment,warehouse,reconciliation}),basis=resolveDjjLastmileWeightBasis(booking,channel);
+    rows.push({booking,channel,engine:djjLastmileMetadata(channel),route,assignment,warehouse,smuManifest:manifest,reconciliation,stage,basisWeightKg:basis.basisWeightKg,weightBasis:basis.weightBasis,sentaniPhysicalCheckMayRepriceCustomer:basis.sentaniPhysicalCheckMayRepriceCustomer,routeRateReferencePerKg:num(route.tarifRekomKg),routeFloorPerKg:num(route.tarifFloorKg),routeFullCostTrip:num(route.fullCostTrip),sla:route.slaTotalHub||route.slaLastmile||route.slaMaster||null});
   }
   rows.sort((a,b)=>String(b.booking.updatedAt||b.booking.createdAt||'').localeCompare(String(a.booking.updatedAt||a.booking.createdAt||'')));
   const count=code=>rows.filter(r=>r.stage.code===code).length;
