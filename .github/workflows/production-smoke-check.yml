@@ -31,6 +31,11 @@ jobs:
           node --check netlify/functions/_admin-audit-core.mjs
           node --check netlify/functions/admin-audit-recovery.mjs
           node --check netlify/functions/_api-auth.mjs
+          node --check netlify/functions/_accurate-partner-deposit-dp-uat-core.mjs
+          node --check netlify/functions/admin-phase1-partner-deposit-dp-uat.mjs
+          node --check netlify/functions/_accurate-partner-deposit-bridge-audit-core.mjs
+          node --check netlify/functions/admin-phase1-partner-deposit-bridge.mjs
+          node --check netlify/functions/_admin-rbac-core.mjs
 
       - name: Unit test Karantina screening guard
         shell: bash
@@ -79,7 +84,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation /admin-audit-backup /admin-audit-recovery /admin-resilience; do
+          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation /admin-audit-backup /admin-audit-recovery /admin-resilience /admin-phase1-partner-deposit-dp-uat; do
             code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://librajayalogistic.com${path}")"
             echo "${path} -> HTTP ${code}"
             case "${code}" in
