@@ -1,4 +1,5 @@
 import { findRoute } from './_master-sheet-core.mjs';
+import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute } from './_djj-lastmile-engine.mjs';
 
 const clean=(v,n=180)=>String(v??'').trim().slice(0,n);
 const upper=v=>clean(v).toUpperCase();
@@ -8,12 +9,8 @@ export const PARTNER_API_SCOPE=Object.freeze({
   label:'Last-mile Hub Sentani/Jayapura',
   hub:'DJJ',
   access:'PARTNER_API_ONLY_LASTMILE',
+  engineId:DJJ_LASTMILE_ENGINE.id,
 });
-
-function djjHub(route={}){
-  const hay=upper(`${route.hub||''} ${route.bandaraAsal||''} ${route.networkHub||''}`);
-  return hay.includes('DJJ')||hay.includes('SENTANI')||hay.includes('DORTHEYS');
-}
 
 function requestedService(input={}){
   return upper(input.serviceType||input.service_type||input.service||input.product||input.product_code||'');
@@ -38,13 +35,8 @@ export async function resolvePartnerApiLastmileRoute(input={}){
   });
   if(!routeResult){const e=new Error('Rute last-mile tidak ditemukan pada Master yang sudah dipublish.');e.code='ROUTE_NOT_FOUND';e.httpStatus=404;throw e;}
   const route=routeResult.route;
-  if(!djjHub(route)){
-    const e=new Error('Partner API hanya dapat menggunakan rute last-mile yang berangkat dari Hub Sentani/Jayapura (DJJ).');
-    e.code='API_SCOPE_FORBIDDEN';e.httpStatus=403;e.routeCode=route.kodeRute||null;throw e;
-  }
-  const mode=upper(route.moda||route.jenisAkses||'DARAT');
-  if(mode&&mode!=='DARAT'&&!mode.includes('ROAD')){
-    const e=new Error('Partner API hanya dapat menggunakan layanan last-mile darat dari Hub Sentani/Jayapura.');
+  if(!isDjjLastmileRoute(route)){
+    const e=new Error('Partner API hanya dapat menggunakan rute last-mile darat dari Hub Sentani/Jayapura (DJJ).');
     e.code='API_SCOPE_FORBIDDEN';e.httpStatus=403;e.routeCode=route.kodeRute||null;throw e;
   }
   return routeResult;
