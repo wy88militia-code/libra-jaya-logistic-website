@@ -1,6 +1,6 @@
 import crypto from 'node:crypto';
 import { getStore } from '@netlify/blobs';
-import { getBookingWithMetadata, saveBooking } from './_booking-core.mjs';
+import { getBooking, getBookingWithMetadata, saveBooking } from './_booking-core.mjs';
 import { getPhase1FinalPriceLock } from './_phase1-price-lock-core.mjs';
 import { writeAdminAudit } from './_admin-audit-core.mjs';
 
@@ -36,9 +36,28 @@ export async function preparePhase1InvoiceDraft({bookingId,session,request}={}){
   const savedDraft=await store().setJSON(key,draft,{onlyIfNew:true});if(!savedDraft.modified){const row=await store().get(key,{type:'json',consistency:'strong'});return {draft:row,booking,idempotent:true};}
   const next={...booking,billingStatus:'INVOICE_DRAFT_READY',invoiceDraftId:draftId,invoiceDraftFingerprint:fp,financeGate:{...(booking.financeGate||{}),status:'INVOICE_DRAFT_READY',autoPost:false,reason:'DRAFT_READY_WAIT_FINANCE_ISSUE'},updatedAt:createdAt};
   const savedBooking=await saveBooking(next,{onlyIfMatch:entry.etag});if(!savedBooking.modified){await store().setJSON(key,{...draft,status:'ORPHANED_BOOKING_CONFLICT',orphanedAt:now()}).catch(()=>{});throw new Error('Booking berubah saat draft dibuat. Draft ditandai ORPHANED; refresh dan ulangi.');}
-  await store().setJSON(`latest/${id}`,{draftId,fingerprint:fp,key,status:'DRAFT',createdAt,createdBy:draft.createdBy},{onlyIfNew:false});
+  await store().setJSON(`latest/${id}`,{draftId,fingerprint:fp,key,status:'DRAFT',createdAt,createdBy:draft.createdBy});
   await writeAdminAudit({session,request,action:'PHASE1_INVOICE_DRAFT_PREPARE',entityType:'BOOKING',entityId:id,before:{billingStatus:booking.billingStatus,invoiceDraftId:booking.invoiceDraftId||null},after:{billingStatus:next.billingStatus,invoiceDraftId:draftId,invoiceDraftFingerprint:fp,total:lockedTotal},note:'Draft invoice Tahap 1 dibuat dari immutable final price lock. Tidak ada posting wallet/Accurate.',metadata:{lockId:lock.lockId,lockFingerprint:lock.fingerprint,lineCount:lines.length,total:lockedTotal}});
   return {draft,booking:next,idempotent:false};
 }
 
 export async function getPhase1InvoiceDraft(bookingId){const id=clean(bookingId,120),idx=await store().get(`latest/${id}`,{type:'json',consistency:'strong'});if(!idx?.key)return null;return store().get(idx.key,{type:'json',consistency:'strong'});}
+
+export async function listPhase1InvoiceDrafts(limit=300){
+  const {blobs}=await store().list({prefix:'latest/'}),selected=blobs.sort((a,b)=>b.key.localeCompare(a.key)).slice(0,Math.max(1,Math.min(Number(limit)||300,1000))),rows=[];
+  for(const blob of selected){const idx=await store().get(blob.key,{type:'json'});if(!idx?.key)continue;const draft=await store().get(idx.key,{type:'json'});if(!draft)continue;const [review,booking]=await Promise.all([store().get(`review/${draft.bookingId}/${draft.fingerprint}`,{type:'json'}),getBooking(draft.bookingId)]);rows.push({draft,review:review||null,booking:booking||null});}
+  return rows.sort((a,b)=>String(b.draft?.createdAt||'').localeCompare(String(a.draft?.createdAt||'')));
+}
+
+export async function reviewPhase1InvoiceDraft({bookingId,session,request,note}={}){
+  const role=String(session?.role||'').toUpperCase();if(!['SUPERADMIN','FINANCE'].includes(role)){const e=new Error('Hanya FINANCE/SUPERADMIN yang dapat mereview draft invoice.');e.httpStatus=403;throw e;}
+  const id=clean(bookingId,120);if(!id)throw new Error('Booking ID wajib.');const idx=await store().get(`latest/${id}`,{type:'json',consistency:'strong'});if(!idx?.key)throw new Error('Draft invoice tidak ditemukan.');
+  const [draft,entry]=await Promise.all([store().get(idx.key,{type:'json',consistency:'strong'}),getBookingWithMetadata(id)]),booking=entry?.data;if(!draft||!booking)throw new Error('Draft/booking tidak ditemukan.');if(draft.status!=='DRAFT')throw new Error(`Draft berstatus ${draft.status}; review baru diblokir.`);if(String(booking.billingStatus||'').toUpperCase()==='INVOICED')throw new Error('Booking sudah INVOICED.');
+  const reviewKey=`review/${id}/${draft.fingerprint}`,existing=await store().get(reviewKey,{type:'json',consistency:'strong'});if(existing?.status==='REVIEWED')return {review:existing,draft,booking,idempotent:true};
+  const reviewedAt=now(),review={reviewId:`P1REV-${Date.now()}-${crypto.randomBytes(4).toString('hex').toUpperCase()}`,bookingId:id,draftId:draft.draftId,draftFingerprint:draft.fingerprint,lockId:draft.lockId,total:draft.total,status:'REVIEWED',reviewedAt,reviewedBy:clean(session.username,100),reviewedByRole:role,note:clean(note,500)||null,postingPolicy:'WAIT_NATIVE_ACCURATE_SALES_INVOICE'};
+  const saved=await store().setJSON(reviewKey,review,{onlyIfNew:true});if(!saved.modified){const row=await store().get(reviewKey,{type:'json',consistency:'strong'});if(row?.status==='REVIEWED')return {review:row,draft,booking,idempotent:true};throw new Error('Review sedang diproses oleh user lain.');}
+  const next={...booking,billingStatus:'FINANCE_REVIEWED_WAIT_NATIVE_SI',financeReview:{reviewId:review.reviewId,draftId:draft.draftId,draftFingerprint:draft.fingerprint,reviewedAt,reviewedBy:review.reviewedBy,status:'REVIEWED'},financeGate:{...(booking.financeGate||{}),status:'FINANCE_REVIEWED_WAIT_NATIVE_SI',autoPost:false,reason:'NATIVE_ACCURATE_SALES_INVOICE_NOT_IMPLEMENTED'},updatedAt:reviewedAt};
+  const savedBooking=await saveBooking(next,{onlyIfMatch:entry.etag});if(!savedBooking.modified){await store().setJSON(reviewKey,{...review,status:'ORPHANED_BOOKING_CONFLICT',orphanedAt:now()}).catch(()=>{});throw new Error('Booking berubah saat Finance review. Review ditandai ORPHANED; refresh dan ulangi.');}
+  await writeAdminAudit({session,request,action:'PHASE1_INVOICE_DRAFT_REVIEW',entityType:'BOOKING',entityId:id,before:{billingStatus:booking.billingStatus,financeReview:booking.financeReview||null},after:{billingStatus:next.billingStatus,financeReview:next.financeReview},note:'Finance mereview draft Tahap 1. Posting ditahan sampai native Accurate Sales Invoice tersedia.',metadata:{draftId:draft.draftId,draftFingerprint:draft.fingerprint,lockId:draft.lockId,total:draft.total}});
+  return {review,draft,booking:next,idempotent:false};
+}
