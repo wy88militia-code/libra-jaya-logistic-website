@@ -22,7 +22,10 @@ function sourceChannel(booking={}){
   return null;
 }
 function routeMap(snapshot){return new Map((snapshot?.routes||[]).map(r=>[String(r.kodeRute||''),r]));}
-function warehouseAtDjj(row){const hub=upper(row?.hub);return Boolean(row&&['INBOUND','STORED','HOLD','DAMAGED'].includes(upper(row.status))&&(hub==='DJJ'||hub.includes('SENTANI')||hub.includes('JAYAPURA')));}
+function warehouseAtDjj(row){
+  const hub=upper(row?.hub),status=upper(row?.status);
+  return Boolean(row&&['INBOUND','STORED','HOLD','DAMAGED','OUTBOUND'].includes(status)&&(hub==='DJJ'||hub.includes('SENTANI')||hub.includes('JAYAPURA')));
+}
 function stageFor({booking,channel,assignment,warehouse,reconciliation}){
   const tracking=trackingStatus(booking),reconStatus=upper(reconciliation?.status),issueCount=num(reconciliation?.summary?.issueCount);
   if(tracking==='DELIVERED')return {code:'DELIVERED',label:'Delivered',tone:'good',ready:false};
@@ -52,11 +55,11 @@ export async function buildDjjLastmileQueue(limit=500){
     const [manifest,reconciliation]=channel==='PARTNER_API'?await Promise.all([getBookingSmuManifest(booking.bookingId),getBookingSmuReconciliation(booking.bookingId)]):[null,null];
     const assignment=assignmentsByBooking.get(String(booking.bookingId))||null,warehouse=warehouseByBooking.get(String(booking.bookingId))||null,stage=stageFor({booking,channel,assignment,warehouse,reconciliation});
     const basisWeightKg=channel==='PARTNER_API'?num(booking.smuTotalWeightKg||booking.weightKg):num(booking.chargeableWeightKg||booking.weightKg);
-    rows.push({booking,channel,engine:djjLastmileMetadata(channel),route,assignment,warehouse,smuManifest:manifest,reconciliation,stage,basisWeightKg,weightBasis:channel==='PARTNER_API'?'PARTNER_PTI':'JLX_FINAL_CHARGEABLE',routeRateReferencePerKg:num(route.tarifRekomKg),routeFloorPerKg:num(route.tarifFloorKg),routeFullCostTrip:num(route.fullCostTrip),sla:route.slaTotalHub||route.slaLastmile||route.slaMaster||null});
+    rows.push({booking,channel,engine:djjLastmileMetadata(channel),route,assignment,warehouse,smuManifest:manifest,reconciliation,stage,basisWeightKg,weightBasis:channel==='PARTNER_API'?'PARTNER_PTI':'JLX_UPSTREAM_FINAL_ARRIVAL',routeRateReferencePerKg:num(route.tarifRekomKg),routeFloorPerKg:num(route.tarifFloorKg),routeFullCostTrip:num(route.fullCostTrip),sla:route.slaTotalHub||route.slaLastmile||route.slaMaster||null});
   }
   rows.sort((a,b)=>String(b.booking.updatedAt||b.booking.createdAt||'').localeCompare(String(a.booking.updatedAt||a.booking.createdAt||'')));
   const count=code=>rows.filter(r=>r.stage.code===code).length;
-  return {engine:DJJ_LASTMILE_ENGINE,masterVersion:snapshot?.version||null,syncedAt:snapshot?.syncedAt||null,summary:{total:rows.length,partnerApi:rows.filter(r=>r.channel==='PARTNER_API').length,jlxInternal:rows.filter(r=>r.channel==='JLX_INTERNAL').length,waitingHub:count('WAITING_HUB_RECEIPT')+count('WAITING_HUB_SCAN'),waitingPti:count('WAITING_PTI'),ready:count('READY_ASSIGNMENT'),assigned:count('ASSIGNED'),outForDelivery:count('OUT_FOR_DELIVERY'),delivered:count('DELIVERED'),hold:count('HOLD')},rows};
+  return {engine:DJJ_LASTMILE_ENGINE,masterVersion:snapshot?.version||null,syncedAt:snapshot?.syncedAt||null,summary:{total:rows.length,partnerApi:rows.filter(r=>r.channel==='PARTNER_API').length,jlxInternal:rows.filter(r=>r.channel==='JLX_INTERNAL').length,waitingFlight:count('WAITING_FLIGHT'),waitingHub:count('WAITING_HUB_RECEIPT')+count('WAITING_HUB_SCAN'),waitingPti:count('WAITING_PTI'),ready:count('READY_ASSIGNMENT'),assigned:count('ASSIGNED'),outForDelivery:count('OUT_FOR_DELIVERY'),delivered:count('DELIVERED'),hold:count('HOLD')},rows};
 }
 
 export async function getDjjLastmileRow(bookingId){const queue=await buildDjjLastmileQueue(1200);return queue.rows.find(r=>String(r.booking.bookingId)===String(bookingId))||null;}
