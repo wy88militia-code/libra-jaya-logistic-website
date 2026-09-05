@@ -14,4 +14,26 @@ function requestMeta(request){if(!request)return {ipHash:null,userAgentHash:null
 
 export async function writeAdminAudit({session,request,action,entityType,entityId,before=null,after=null,status='SUCCESS',note=null,metadata=null}={}){const actor=clean(session?.username||'unknown',100),role=clean(session?.role||'UNKNOWN',80),createdAt=now(),auditId=`AUD-${Date.now()}-${crypto.randomBytes(5).toString('hex')}`;const base={auditId,createdAt,actor,role,action:clean(action,120),entityType:clean(entityType,100),entityId:clean(entityId,180)||null,status:clean(status,30)||'SUCCESS',note:clean(note,1000)||null,request:requestMeta(request),before:sanitize(before),after:sanitize(after),metadata:sanitize(metadata)};const s=store();const eventKey=`event/${createdAt}-${auditId}`;for(let attempt=0;attempt<8;attempt+=1){const headEntry=await s.getWithMetadata('head/current',{type:'json',consistency:'strong'});const prev=headEntry?.data||{hash:null,auditId:null};const record={...base,prevHash:prev.hash||null};const recordHash=hashRecord(record);await s.setJSON(eventKey,{...record,recordHash});const result=await s.setJSON('head/current',{auditId,hash:recordHash,createdAt},headEntry?{onlyIfMatch:headEntry.etag}:{onlyIfNew:true});if(result.modified)return {...record,recordHash};await s.delete(eventKey);}throw new Error('Audit trail sedang sibuk. Perubahan utama sudah diproses tetapi audit perlu dicek.');}
 export async function listAdminAudit(limit=300){const {blobs}=await store().list({prefix:'event/'});const selected=blobs.sort((a,b)=>b.key.localeCompare(a.key)).slice(0,Math.max(1,Math.min(Number(limit)||300,1000)));const rows=[];for(const blob of selected){const row=await store().get(blob.key,{type:'json'});if(row)rows.push(row);}return rows;}
-export async function verifyAuditChain(limit=1000){const rows=(await listAdminAudit(limit)).sort((a,b)=>String(a.createdAt).localeCompare(String(b.createdAt)));const head=await store().get('head/current',{type:'json',consistency:'strong'});let prevHash=rows[0]?.prevHash||null,valid=true,brokenAt=null;for(const row of rows){const {recordHash,...record}=row;const calculated=hashRecord(record);if(calculated!==recordHash||record.prevHash!==prevHash){valid=false;brokenAt=row.auditId;break;}prevHash=recordHash;}if(valid&&rows.length&&head?.hash!==prevHash){valid=false;brokenAt='HEAD_MISMATCH';}if(valid&&!rows.length&&head?.hash){valid=false;brokenAt='HEAD_WITHOUT_EVENTS';}return {valid,checked:rows.length,brokenAt,lastHash:prevHash,headHash:head?.hash||null};}
+
+export async function verifyAuditChain(limit=1000){
+ const rows=await listAdminAudit(limit),head=await store().get('head/current',{type:'json',consistency:'strong'});
+ if(!rows.length)return {valid:!head?.hash,checked:0,brokenAt:head?.hash?'HEAD_WITHOUT_EVENTS':null,lastHash:null,headHash:head?.hash||null,method:'HASH_LINK_WALK'};
+ const byHash=new Map();
+ for(const row of rows){
+  const {recordHash,...record}=row,calculated=hashRecord(record);
+  if(!recordHash||calculated!==recordHash)return {valid:false,checked:rows.length,brokenAt:row.auditId||'RECORD_HASH_MISMATCH',lastHash:null,headHash:head?.hash||null,method:'HASH_LINK_WALK'};
+  if(byHash.has(recordHash))return {valid:false,checked:rows.length,brokenAt:row.auditId||'DUPLICATE_RECORD_HASH',lastHash:null,headHash:head?.hash||null,method:'HASH_LINK_WALK'};
+  byHash.set(recordHash,row);
+ }
+ if(!head?.hash)return {valid:false,checked:rows.length,brokenAt:'EVENTS_WITHOUT_HEAD',lastHash:null,headHash:null,method:'HASH_LINK_WALK'};
+ const visited=new Set();let currentHash=head.hash,lastHash=head.hash,lastRow=null;
+ while(currentHash){
+  if(visited.has(currentHash))return {valid:false,checked:rows.length,brokenAt:'HASH_CYCLE',lastHash:currentHash,headHash:head.hash,method:'HASH_LINK_WALK'};
+  const row=byHash.get(currentHash);
+  if(!row)return {valid:false,checked:rows.length,brokenAt:'HEAD_OR_ANCESTOR_MISSING',lastHash:currentHash,headHash:head.hash,method:'HASH_LINK_WALK'};
+  visited.add(currentHash);lastRow=row;currentHash=row.prevHash||null;
+ }
+ if(head.auditId&&byHash.get(head.hash)?.auditId!==head.auditId)return {valid:false,checked:rows.length,brokenAt:'HEAD_AUDIT_ID_MISMATCH',lastHash:head.hash,headHash:head.hash,method:'HASH_LINK_WALK'};
+ if(visited.size!==rows.length){const orphan=rows.find(r=>!visited.has(r.recordHash));return {valid:false,checked:rows.length,brokenAt:orphan?.auditId||'ORPHAN_EVENT',lastHash:head.hash,headHash:head.hash,method:'HASH_LINK_WALK'};}
+ return {valid:true,checked:rows.length,brokenAt:null,lastHash:head.hash,headHash:head.hash,genesisAuditId:lastRow?.auditId||null,method:'HASH_LINK_WALK'};
+}
