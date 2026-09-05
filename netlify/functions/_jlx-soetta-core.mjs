@@ -26,6 +26,7 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   const warehouseStatus=String(warehouse?.status||'').toUpperCase();
   const assignmentStatus=String(assignment?.status||'').toUpperCase();
   const weightStatus=String(weight?.weightStatus||'').toUpperCase();
+  const pickupRequired=booking?.requiresPickup!==false;
 
   if(PAYMENT_BLOCKED.has(bookingStatus))return {code:'BLOCKED',label:'Tertahan Pembayaran',rank:0,tone:'bad',nextLabel:'Cek pembayaran',nextHref:'/admin-finance-billing'};
   if(['DEPARTED','ARRIVED','COMPLETED'].includes(manifestStatus)||['IN_TRANSIT','CONNECTING_FLIGHT','ARRIVED_DESTINATION','OUT_FOR_DELIVERY','DELIVERED'].includes(tracking))return {code:'BERANGKAT',label:'Berangkat / In Transit',rank:6,tone:'good',nextLabel:'Lihat Manifest',nextHref:'/admin-manifests'};
@@ -38,6 +39,7 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   if(warehouse&&['INBOUND','STORED','HOLD','DAMAGED'].includes(warehouseStatus))return {code:'GUDANG',label:warehouseStatus==='INBOUND'?'Terima Gudang':'Gudang Transit',rank:2,tone:warehouseStatus==='HOLD'||warehouseStatus==='DAMAGED'?'bad':'blue',nextLabel:'Timbang Barang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
   if(['PICKED_UP','AT_ORIGIN_HUB'].includes(tracking)||['IN_CUSTODY','AT_HUB','HANDOVER_PENDING'].includes(assignmentStatus))return {code:'MENUJU_GUDANG',label:'Menuju Gudang',rank:2,tone:'blue',nextLabel:'Terima Gudang',nextHref:`/admin-warehouse?booking=${encodeURIComponent(booking.bookingId)}`};
   if(assignment||tracking==='PICKUP_ASSIGNED')return {code:'PICKUP',label:'Pickup / Jemput',rank:1,tone:'warn',nextLabel:'Kelola Pickup',nextHref:`/admin-courier-assignment?booking=${encodeURIComponent(booking.bookingId)}`};
+  if(!pickupRequired)return {code:'PESANAN',label:'Pesanan / Drop-off Port',rank:0,tone:'neutral',nextLabel:'Terima di Gudang Soetta',nextHref:`/admin-warehouse?booking=${encodeURIComponent(booking.bookingId)}`};
   return {code:'PESANAN',label:'Pesanan Masuk',rank:0,tone:'neutral',nextLabel:'Terima & Assign Pickup',nextHref:`/admin-courier-assignment?booking=${encodeURIComponent(booking.bookingId)}`};
 }
 
