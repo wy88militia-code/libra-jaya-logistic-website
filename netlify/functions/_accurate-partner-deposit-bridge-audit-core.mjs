@@ -25,7 +25,9 @@ function walletLedgerSummary(wallet,rows=[]){
   const processedRefCount=Object.keys(wallet?.processedRefs||{}).length,ledgerCount=rows.length,completeByReferenceCount=processedRefCount<=1000&&ledgerCount===processedRefCount,signedTotal=rows.reduce((s,x)=>s+Math.trunc(Number(x?.signedAmount)||0),0),balance=Math.trunc(Number(wallet?.balance)||0),sourceTotals={};
   for(const row of rows){const source=clean(row?.source||'UNKNOWN',80).toUpperCase(),signed=Math.trunc(Number(row?.signedAmount)||0);if(!sourceTotals[source])sourceTotals[source]={source,credits:0,debits:0,net:0,count:0};const item=sourceTotals[source];item.count+=1;item.net+=signed;if(signed>0)item.credits+=signed;else item.debits+=Math.abs(signed);}
   const sources=Object.values(sourceTotals).sort((a,b)=>Math.abs(b.net)-Math.abs(a.net));
-  return {processedRefCount,ledgerCount,ledgerLimit:1000,completeByReferenceCount,signedTotal,balance,balanceMatchesLedger:completeByReferenceCount&&signedTotal===balance,sourceTotals:sources,recent:rows.slice(0,30).map(x=>({transactionId:x.transactionId,createdAt:x.createdAt,source:x.source,reference:x.reference,direction:x.direction,amount:x.amount,signedAmount:x.signedAmount,balanceAfter:x.balanceAfter}))};
+  const recent=rows.slice(0,50).map(x=>({transactionId:x.transactionId,createdAt:x.createdAt,source:x.source,reference:x.reference,direction:x.direction,amount:x.amount,signedAmount:x.signedAmount,balanceAfter:x.balanceAfter,topupReference:clean(x?.metadata?.referenceId,180)||null,paymentId:clean(x?.metadata?.paymentId,180)||null}));
+  const xenditTopupCandidates=recent.filter(x=>String(x.source||'').toUpperCase()==='XENDIT'&&x.direction==='CREDIT'&&x.topupReference&&x.paymentId).map(x=>({referenceId:x.topupReference,paymentId:x.paymentId,transactionId:x.transactionId,amount:Math.abs(Math.trunc(Number(x.signedAmount)||0)),createdAt:x.createdAt}));
+  return {processedRefCount,ledgerCount,ledgerLimit:1000,completeByReferenceCount,signedTotal,balance,balanceMatchesLedger:completeByReferenceCount&&signedTotal===balance,sourceTotals:sources,recent,xenditTopupCandidates};
 }
 
 export async function buildPartnerDepositBridgeAudit(bookingId){
