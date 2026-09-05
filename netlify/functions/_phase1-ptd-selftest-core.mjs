@@ -4,6 +4,8 @@ import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, resolveDjjLastmileWeightBasis 
 import { allocateFinanceIncomingHandling } from './_finance-smu-handling-core.mjs';
 import { isPhase1JlxInternalBooking, simulatePhase1PtpSelling } from './_phase1-final-pricing-core.mjs';
 import { calculateRateAmount } from './_rate-plan-core.mjs';
+import { deterministicPhase1SalesInvoiceNumber, verifyAccurateSalesInvoiceDetail } from './_accurate-sales-invoice-verify-core.mjs';
+import { phase1NativeSiWalletContract, verifyPhase1NativeSiWalletContract } from './_phase1-native-si-wallet-core.mjs';
 
 function assert(name,condition,detail){if(!condition){const e=new Error(`${name}: ${detail}`);e.check=name;throw e;}return {name,status:'PASS',detail};}
 function component(row,code){return (row?.components||[]).find(x=>x.code===code);}
@@ -26,6 +28,17 @@ export function runPhase1PtdSelfTest(){
   const m5=marginSim.find(x=>x.marginPct===5),m10=marginSim.find(x=>x.marginPct===10),m15=marginSim.find(x=>x.marginPct===15),m20=marginSim.find(x=>x.marginPct===20);
   checks.push(assert('PTP_MARGIN_SIM_ROUNDING',m5?.ptpSellRatePerKg===74000&&m10?.ptpSellRatePerKg===78000&&m15?.ptpSellRatePerKg===81000&&m20?.ptpSellRatePerKg===85000,'Rate simulasi 5/10/15/20% dibulatkan ke Rp74k/Rp78k/Rp81k/Rp85k per kg sesuai roundTo Rp1.000.'));
   checks.push(assert('PTP_MARGIN_SIM_NO_HIDDEN_SMU',m10?.ptpFreight===780000&&m10?.totalPreview===850000,'Simulasi 10 kg @10% menghasilkan PTP Rp780.000 + last-mile Rp70.000 tanpa admin/SMU disisipkan penuh per booking.'));
+
+  const nativeContract=phase1NativeSiWalletContract(),nativeContractCheck=verifyPhase1NativeSiWalletContract();
+  checks.push(assert('NATIVE_SI_SETTLEMENT_NOT_BOOKING',nativeContract.source==='PHASE1_NATIVE_SI_SETTLEMENT'&&nativeContract.source!=='BOOKING','Native SI settlement memakai source khusus dan tidak dapat kembali menjadi BOOKING_REVENUE legacy.'));
+  checks.push(assert('NATIVE_SI_LEGACY_AUTO_IGNORED',nativeContract.legacyAutoMarkerStatus==='IGNORED'&&nativeContract.legacyBookingSourceForbidden===true&&nativeContractCheck.ok===true,'Kontrak anti-double Native SI → legacy auto-JV wajib IGNORED dan source BOOKING dilarang.'));
+  const invNoA=deterministicPhase1SalesInvoiceNumber('BKG-P1-001','fp-abc'),invNoB=deterministicPhase1SalesInvoiceNumber('BKG-P1-001','fp-abc'),invNoChanged=deterministicPhase1SalesInvoiceNumber('BKG-P1-001','fp-def');
+  checks.push(assert('NATIVE_SI_DETERMINISTIC_NUMBER',invNoA===invNoB&&invNoA!==invNoChanged&&invNoA.startsWith('JLX-P1-'),'Nomor Native SI stabil untuk booking+draft yang sama dan berubah bila fingerprint draft berubah.'));
+  const expectedSi={number:invNoA,customerNo:'CUST-P1',branchName:'JLX Cargo',total:850000,detailItem:[{itemNo:'PTP-CGK-DJJ',quantity:10,unitPrice:78000},{itemNo:'DJJ-LASTMILE',quantity:10,unitPrice:7000}]};
+  const detailSi={number:invNoA,customerNo:'CUST-P1',branchName:'JLX Cargo',totalAmount:850000,detailItem:[{itemNo:'PTP-CGK-DJJ',quantity:10,unitPrice:78000},{itemNo:'DJJ-LASTMILE',quantity:10,unitPrice:7000}]};
+  const verifiedSi=verifyAccurateSalesInvoiceDetail(detailSi,expectedSi),wrongTotalSi=verifyAccurateSalesInvoiceDetail({...detailSi,totalAmount:849999},expectedSi),wrongItemSi=verifyAccurateSalesInvoiceDetail({...detailSi,detailItem:[{itemNo:'PTP-CGK-DJJ',quantity:10,unitPrice:78000},{itemNo:'DJJ-LASTMILE',quantity:9,unitPrice:7000}]},expectedSi);
+  checks.push(assert('NATIVE_SI_STRICT_READBACK_PASS',verifiedSi.verified===true&&Object.values(verifiedSi.checks).every(Boolean),'Read-back Native SI hanya PASS bila nomor/customer/cabang/total/item seluruhnya identik.'));
+  checks.push(assert('NATIVE_SI_STRICT_READBACK_REJECTS_DRIFT',wrongTotalSi.verified===false&&wrongTotalSi.checks.total===false&&wrongItemSi.verified===false&&wrongItemSi.checks.items===false,'Perubahan total atau item wajib menggagalkan read-back dan mencegah cutover/retry buta.'));
 
   const allocated=allocateOperationalCosts([
     {bookingId:'TEST-A',hubCode:'CGK',chargeableWeightKg:3,smuNumber:'SMU-PHASE1-TEST',isLastmileIncoming:true,airlinePtpPolicy:garudaPolicy},
@@ -64,5 +77,5 @@ export function runPhase1PtdSelfTest(){
   const ptpOnly=allocateFinanceIncomingHandling([{bookingId:'PTP-ONLY',serviceType:'PTP',requiresLastmile:false,chargeableWeightKg:20}],new Map([['PTP-ONLY',{smuNumbers:['SMU-PTP']}]]));
   checks.push(assert('FINANCE_PTP_EXCLUDED',ptpOnly.smuCount===0&&ptpOnly.total===0,'Booking PTP-only tidak terkena handling incoming last-mile.'));
 
-  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,partnerApiPtpPricingAllowed:false,garuda12KgVendorCost:batch.total,ptpSell10PctPerKg:m10?.ptpSellRatePerKg||0,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
+  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,partnerApiPtpPricingAllowed:false,nativeSiSettlementSource:nativeContract.source,nativeSiExampleInvoiceNo:invNoA,garuda12KgVendorCost:batch.total,ptpSell10PctPerKg:m10?.ptpSellRatePerKg||0,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
 }
