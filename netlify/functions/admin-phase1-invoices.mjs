@@ -1,7 +1,7 @@
 import { getAdminSession } from './_partner-core.mjs';
 import { listPhase1InvoiceDrafts, reviewPhase1InvoiceDraft } from './_phase1-invoice-draft-core.mjs';
 
-const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const rup=v=>`Rp${Math.round(Number(v)||0).toLocaleString('id-ID')}`;
 function sameOrigin(request){const u=new URL(request.url),o=request.headers.get('origin'),r=request.headers.get('referer');if(o)return o===u.origin;if(r){try{return new URL(r).origin===u.origin}catch{return false}}return false;}
 function stamp(v){if(!v)return '—';try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'medium',timeStyle:'short',timeZone:'Asia/Jayapura'}).format(new Date(v))+' WIT';}catch{return String(v);}}
