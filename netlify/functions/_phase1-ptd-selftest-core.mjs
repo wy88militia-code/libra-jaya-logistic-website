@@ -1,5 +1,7 @@
 import { allocateOperationalCosts } from './_smu-cost-allocation-core.mjs';
 import { calculatePhase1PtpVendorBatchCost, phase1CustomerChargeableKg, resolveAirlinePtpCostPolicy } from './_phase1-ptd-core.mjs';
+import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, resolveDjjLastmileWeightBasis } from './_djj-lastmile-engine.mjs';
+import { calculateRateAmount } from './_rate-plan-core.mjs';
 
 function assert(name,condition,detail){if(!condition){const e=new Error(`${name}: ${detail}`);e.check=name;throw e;}return {name,status:'PASS',detail};}
 function component(row,code){return (row?.components||[]).find(x=>x.code===code);}
@@ -29,5 +31,14 @@ export function runPhase1PtdSelfTest(){
   checks.push(assert('UNIQUE_SMU_INCOMING_HANDLING',incomingTotal===25000,`Satu SMU dua booking tetap handling incoming total Rp${incomingTotal.toLocaleString('id-ID')}.`));
   checks.push(assert('NO_GENERIC_CGK_DUPLICATE',raTotal===0&&whTotal===0&&genericSmuTotal===0,'RA, gudang dan generic SMU tidak muncul lagi di atas PTP Garuda all-in.'));
 
-  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal},testedAt:new Date().toISOString()};
+  checks.push(assert('DJJ_LASTMILE_ROUTE_ONLY',isDjjLastmileRoute({hub:'DJJ',moda:'DARAT'})&&!isDjjLastmileRoute({hub:'WMX',moda:'DARAT'}),'Shared last-mile engine menerima Hub DJJ/Sentani dan menolak hub non-DJJ.'));
+  const apiBasis=resolveDjjLastmileWeightBasis({smuTotalWeightKg:12.4,weightKg:9.2},'PARTNER_API');
+  checks.push(assert('PARTNER_API_PTI_WEIGHT_LOCK',apiBasis.weightBasis==='PARTNER_PTI'&&apiBasis.basisWeightKg===12.4&&apiBasis.sentaniPhysicalCheckMayRepriceCustomer===false,'Partner API tetap memakai berat PTI partner; cek fisik Sentani tidak mereprice customer.'));
+  const jlxBasis=resolveDjjLastmileWeightBasis({chargeableWeightKg:8.6,weightKg:6.1},'JLX_INTERNAL');
+  checks.push(assert('JLX_ARRIVAL_WEIGHT_LOCK',jlxBasis.weightBasis==='JLX_UPSTREAM_FINAL_ARRIVAL'&&jlxBasis.basisWeightKg===8.6&&jlxBasis.sentaniPhysicalCheckMayRepriceCustomer===false,'JL Express last-mile memakai final upstream/arrival; Sentani tidak mengubah billing airfreight.'));
+  const lastmileQuote=calculateRateAmount({ratePerKg:7000,minimumChargeKg:0,fixedFee:0,handlingFee:0,surchargePct:0,cutoffWit:'14:00'},5);
+  checks.push(assert('LASTMILE_ROUTE_NO_HIDDEN_25K',lastmileQuote?.handlingFee===0&&lastmileQuote?.totalAmount===35000,'Tarif rute 5 kg × Rp7.000 = Rp35.000 tanpa Rp25.000 incoming disisipkan per booking.'));
+  checks.push(assert('DJJ_ENGINE_NO_SENTANI_REPRICE',DJJ_LASTMILE_ENGINE.billingPolicy.sentaniPhysicalCheckMayRepriceCustomer===false,'DJJ_LASTMILE_V1 mengunci Sentani physical check sebagai audit/incident evidence, bukan sumber repricing customer.'));
+
+  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0},testedAt:new Date().toISOString()};
 }
