@@ -7,7 +7,7 @@ const toNumber=value=>Number.isFinite(Number(value))?Number(value):null;
 const kg2=value=>Math.round(Number(value||0)*100)/100;
 const upper=value=>String(value??'').trim().toUpperCase();
 
-export const LOGISTICS_RULE_VERSION='2026-09-05.1';
+export const LOGISTICS_RULE_VERSION='2026-09-05.2';
 export const WEIGHT_CLEAR_THRESHOLD_KG=0.2;
 
 export const HUB_COST_RULES=Object.freeze({
@@ -89,7 +89,7 @@ export function describeOperationalCostRules(input={}){
     }:null,
     lastmileHandlingBarangPerSmu:isLastmileIncoming?LASTMILE_COST_RULES.handlingBarangPerSmu:0,
     perSmuAllocationRequired:Boolean((hub?.smuHandlingPerSmu||0)||(isDgGadget&&hub?.dgGadgetPerSmu)||(isLastmileIncoming&&LASTMILE_COST_RULES.handlingBarangPerSmu)),
-    note:'Per-SMU cost wajib dikenakan sekali di level SMU/consolidation lalu dialokasikan; jangan dikali jumlah booking.',
+    note:'Per-SMU cost wajib dikenakan sekali di level SMU/consolidation lalu dialokasikan; jangan dikali jumlah booking. Untuk PTP airline all-in, inclusion policy airline wajib mengalahkan generic CGK components agar RA/gudang/SMU tidak dobel.',
   };
 }
 
