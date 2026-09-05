@@ -3,7 +3,7 @@ import { getBooking } from './_booking-core.mjs';
 import { getPhase1FinalPriceLock } from './_phase1-price-lock-core.mjs';
 import { getPhase1InvoiceDraft, preparePhase1InvoiceDraft } from './_phase1-invoice-draft-core.mjs';
 
-const esc=v=>String(v??'').replace(/[&<>'\"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','\"':'&quot;'}[c]));
+const esc=v=>String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));
 const rup=v=>`Rp${Math.round(Number(v)||0).toLocaleString('id-ID')}`;
 const qty=v=>Number(v||0).toLocaleString('id-ID',{maximumFractionDigits:2});
 function sameOrigin(request){const u=new URL(request.url),o=request.headers.get('origin'),r=request.headers.get('referer');if(o)return o===u.origin;if(r){try{return new URL(r).origin===u.origin}catch{return false}}return false;}
