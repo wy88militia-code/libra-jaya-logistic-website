@@ -4,6 +4,7 @@ import { getBooking, updateBooking } from './_booking-core.mjs';
 import { createOperationalNotification } from './_notification-core.mjs';
 import { queueTrackingWebhook } from './_partner-webhook.mjs';
 import { bookingSmuReadyForRoute } from './_smu-core.mjs';
+import { getManifest } from './_manifest-core.mjs';
 
 const TRACKING_STORE='libra-tracking';
 const POD_STORE='libra-pod';
@@ -13,6 +14,8 @@ const PAYMENT_BLOCKED=new Set(['PAYMENT_PENDING','WAITING_TOPUP','PAYMENT_FAILED
 const SCAN_REQUIRED=new Set(['PICKED_UP','AT_ORIGIN_HUB','IN_TRANSIT','CONNECTING_FLIGHT','ARRIVED_DESTINATION','OUT_FOR_DELIVERY','DELIVERED']);
 const INCIDENTS=new Set(['HELD','DAMAGED','LOST','MIXED_UP','CLAIM_PROCESS']);
 const PHOTO_REQUIRED_INCIDENTS=new Set(['HELD','DAMAGED','LOST','MIXED_UP']);
+const MANIFEST_STATUSES=new Set(['IN_TRANSIT','ARRIVED_DESTINATION']);
+const PROGRESS_RANK={BOOKED:0,PICKUP_ASSIGNED:1,PICKED_UP:2,AT_ORIGIN_HUB:3,IN_TRANSIT:4,CONNECTING_FLIGHT:5,ARRIVED_DESTINATION:6,OUT_FOR_DELIVERY:7,DELIVERED:8};
 const DELIVERY_GEOFENCE_METERS=Math.max(50,Number(process.env.POD_GEOFENCE_METERS||200));
 function trackingStore(){return getStore(TRACKING_STORE);}
 function podStore(){return getStore(POD_STORE);}
@@ -73,6 +76,30 @@ export async function addTrackingEvent(input={}){
   try{const module=await import('./_sla-monitor-core.mjs');slaEvaluation=await module.evaluateBookingSla(updatedBooking,{emitAlerts:true});}catch{}
   return {...event,webhookDispatch,webhookQueueError,slaEvaluation};
 }
+
+/**
+ * Manifest-authoritative bridge for shared-SMU flights. This is intentionally
+ * separate from addTrackingEvent: no physical scan is invented or marked as
+ * verified. The AIR manifest + booking uplift is the evidence source.
+ */
+export async function addManifestTrackingEvent(input={}){
+  const bookingId=clean(input.bookingId,120),manifestId=clean(input.manifestId,120),status=clean(input.status,60).toUpperCase();if(!bookingId||!manifestId)throw new Error('Booking ID dan Manifest ID wajib.');if(!MANIFEST_STATUSES.has(status))throw new Error('Status manifest tracking hanya IN_TRANSIT / ARRIVED_DESTINATION.');
+  const [booking,manifest,latest]=await Promise.all([getBooking(bookingId),getManifest(manifestId),trackingStore().get(`latest/${bookingId}`,{type:'json',consistency:'strong'})]);if(!booking)throw new Error('Booking tidak ditemukan.');if(!manifest)throw new Error('Manifest tidak ditemukan.');if(String(manifest.mode||'').toUpperCase()!=='AIR')throw new Error('Tracking authoritative ini hanya untuk manifest AIR.');if(!manifest.items?.[bookingId])throw new Error('Booking tidak terdaftar pada manifest tersebut.');
+  if(PAYMENT_BLOCKED.has(booking.status))throw new Error(`Booking ${booking.status}; tracking operasional belum boleh dimulai.`);if(booking.status==='DELIVERED')return {skipped:true,reason:'ALREADY_DELIVERED',bookingId,manifestId,status};if(INCIDENTS.has(String(latest?.status||booking.currentTrackingStatus||booking.status||'').toUpperCase()))return {skipped:true,reason:'ACTIVE_INCIDENT',bookingId,manifestId,status};
+  const manifestStatus=String(manifest.status||'').toUpperCase();if(status==='IN_TRANSIT'&&!['DEPARTED','ARRIVED','COMPLETED'].includes(manifestStatus))throw new Error(`Manifest ${manifestId} belum DEPARTED.`);if(status==='ARRIVED_DESTINATION'&&!['ARRIVED','COMPLETED'].includes(manifestStatus))throw new Error(`Manifest ${manifestId} belum ARRIVED.`);
+  const item=manifest.items[bookingId],netMovedWeightKg=Math.round((Number(item.upliftWeightKg||0)-Number(item.offloadWeightKg||0))*100)/100;if(!(netMovedWeightKg>0))return {skipped:true,reason:'OFFLOADED_OR_NOT_UPLIFTED',bookingId,manifestId,status,netMovedWeightKg};
+  if(latest?.authoritativeSource==='AIR_MANIFEST'&&latest?.manifestId===manifestId&&latest?.status===status)return {...latest,idempotent:true};
+  const currentStatus=String(latest?.status||booking.currentTrackingStatus||booking.status||'BOOKED').toUpperCase(),currentRank=PROGRESS_RANK[currentStatus],targetRank=PROGRESS_RANK[status];if(Number.isFinite(currentRank)&&currentRank>targetRank)return {skipped:true,reason:'TRACKING_ALREADY_AHEAD',bookingId,manifestId,status,currentStatus};
+  const previous=await trackingStore().get(`head/${bookingId}`,{type:'json',consistency:'strong'}),eventId=`EVT-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,createdAt=now(),batchId=clean(input.batchId,140)||null,smuNumber=clean(input.smuNumber,80)||null;
+  const event={eventId,bookingId,partnerId:booking.partnerId,status,courierName:null,receiverName:null,note:clean(input.note,1000)||`Status otomatis dari AIR manifest ${manifestId}.`,podId:null,incidentPhotoId:null,condition:null,claimStatus:null,claimReference:null,scanCodeMasked:null,scanVerified:false,latitude:null,longitude:null,accuracyMeters:null,destinationDistanceMeters:null,geofenceMeters:null,authoritativeSource:'AIR_MANIFEST',manifestId,batchId,smuNumber,manifestStatus,netMovedWeightKg,carrier:clean(manifest.carrier,120)||null,serviceNumber:clean(manifest.serviceNumber,80)||null,sourceActor:clean(input.actor,100)||'system',previousEventHash:previous?.eventHash||null,createdAt};event.eventHash=stableEventHash(event);
+  const ts=trackingStore();await ts.setJSON(`event/${bookingId}/${createdAt}-${eventId}`,event,{onlyIfNew:true});await ts.setJSON(`latest/${bookingId}`,event);await ts.setJSON(`head/${bookingId}`,{eventId,eventHash:event.eventHash,createdAt});
+  const patch={status,currentTrackingStatus:status,lastTrackingAt:createdAt,lastTrackingEventHash:event.eventHash,lastManifestId:manifestId,lastSharedSmuNumber:smuNumber};if(status==='IN_TRANSIT')patch.onRouteAt=createdAt;if(status==='ARRIVED_DESTINATION')patch.arrivedDestinationAt=createdAt;const updatedBooking=await updateBooking(bookingId,patch);let webhookDispatch=null,webhookQueueError=null,slaEvaluation=null;
+  try{webhookDispatch=await queueTrackingWebhook(event,updatedBooking);}catch(error){webhookQueueError=String(error?.message||error).slice(0,300);}
+  try{if(status==='ARRIVED_DESTINATION')await createOperationalNotification({partnerId:booking.partnerId,type:'ARRIVED_DESTINATION',severity:'SUCCESS',title:'Kiriman tiba di Jayapura',message:`Booking ${bookingId} telah tiba di hub DJJ dan siap proses last-mile.`,reference:bookingId,partnerLink:'/partner/history.html',adminLink:'/jlx-soetta/marketplace',dedupeKey:`manifest-arrived:${manifestId}:${bookingId}`,metadata:{bookingId,manifestId,batchId,smuNumber,netMovedWeightKg}});if(webhookQueueError)await createOperationalNotification({partnerId:booking.partnerId,type:'WEBHOOK_QUEUE_ERROR',severity:'CRITICAL',title:'Webhook tracking gagal diantrikan',message:`Event ${status} untuk booking ${bookingId} gagal masuk antrean webhook: ${webhookQueueError}`,reference:bookingId,partnerLink:'/partner/webhook-control',adminLink:'/admin-webhook-control',dedupeKey:`webhook-queue:${eventId}`,metadata:{bookingId,eventId,error:webhookQueueError}});}catch{}
+  try{const module=await import('./_sla-monitor-core.mjs');slaEvaluation=await module.evaluateBookingSla(updatedBooking,{emitAlerts:true});}catch{}
+  return {...event,webhookDispatch,webhookQueueError,slaEvaluation};
+}
+
 export async function listTrackingEvents(bookingId,limit=100){const {blobs}=await trackingStore().list({prefix:`event/${clean(bookingId,120)}/`});const selected=blobs.sort((a,b)=>a.key.localeCompare(b.key)).slice(-Math.max(1,Math.min(limit,300)));const rows=[];for(const blob of selected){const event=await trackingStore().get(blob.key,{type:'json'});if(event)rows.push(event);}return rows;}
 export async function verifyTrackingChain(bookingId){const rows=await listTrackingEvents(bookingId,300);let previous=null;for(const row of rows){if((row.previousEventHash||null)!==previous)return {ok:false,eventId:row.eventId,reason:'PREVIOUS_HASH_MISMATCH'};if(stableEventHash(row)!==row.eventHash)return {ok:false,eventId:row.eventId,reason:'EVENT_HASH_MISMATCH'};previous=row.eventHash;}return {ok:true,count:rows.length,headHash:previous};}
 export async function listIncidentEvents(limit=200){const {blobs}=await trackingStore().list({prefix:'event/'});const selected=blobs.sort((a,b)=>b.key.localeCompare(a.key)).slice(0,1000);const rows=[];for(const blob of selected){const event=await trackingStore().get(blob.key,{type:'json'});if(event&&INCIDENTS.has(event.status))rows.push(event);if(rows.length>=limit)break;}return rows;}
