@@ -27,13 +27,13 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   const weightStatus=String(weight?.weightStatus||'').toUpperCase();
 
   if(PAYMENT_BLOCKED.has(bookingStatus))return {code:'BLOCKED',label:'Tertahan Pembayaran',rank:0,tone:'bad',nextLabel:'Cek pembayaran',nextHref:'/admin-finance-billing'};
-  if(['DEPARTED','ARRIVED','COMPLETED'].includes(manifestStatus)||['IN_TRANSIT','CONNECTING_FLIGHT','ARRIVED_DESTINATION','OUT_FOR_DELIVERY','DELIVERED'].includes(tracking))return {code:'BERANGKAT',label:'Berangkat / In Transit',rank:7,tone:'good',nextLabel:'Lihat Manifest',nextHref:'/admin-manifests'};
-  if(manifest&&['OPEN','CLOSED'].includes(manifestStatus))return {code:'SMU',label:'SMU / Manifest',rank:6,tone:'blue',nextLabel:'Kelola SMU',nextHref:'/admin-manifests'};
+  if(['DEPARTED','ARRIVED','COMPLETED'].includes(manifestStatus)||['IN_TRANSIT','CONNECTING_FLIGHT','ARRIVED_DESTINATION','OUT_FOR_DELIVERY','DELIVERED'].includes(tracking))return {code:'BERANGKAT',label:'Berangkat / In Transit',rank:6,tone:'good',nextLabel:'Lihat Manifest',nextHref:'/admin-manifests'};
+  if(manifest&&['OPEN','CLOSED'].includes(manifestStatus))return {code:'SMU',label:'SMU / Manifest',rank:5,tone:'blue',nextLabel:'Kelola SMU',nextHref:'/admin-manifests'};
   if(weight?.status==='VERIFIED'){
-    if(weightStatus==='WEIGHT_ADJUSTMENT'||weight?.billingReviewRequired)return {code:'WEIGHT_ADJUSTMENT',label:'Perlu Approval Berat',rank:4,tone:'warn',nextLabel:'Review Timbang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
-    return {code:'SIAP_FAKTUR',label:'Siap Faktur',rank:5,tone:'good',nextLabel:'Data Faktur Siap',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
+    if(weightStatus==='WEIGHT_ADJUSTMENT'||weight?.billingReviewRequired)return {code:'WEIGHT_ADJUSTMENT',label:'Perlu Approval Berat',rank:3,tone:'warn',nextLabel:'Review Timbang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
+    return {code:'SIAP_FAKTUR',label:'Siap Faktur',rank:4,tone:'good',nextLabel:'Data Faktur Siap',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
   }
-  if(warehouse&&['INBOUND','STORED','HOLD','DAMAGED'].includes(warehouseStatus))return {code:'GUDANG',label:warehouseStatus==='INBOUND'?'Terima Gudang':'Gudang Transit',rank:3,tone:warehouseStatus==='HOLD'||warehouseStatus==='DAMAGED'?'bad':'blue',nextLabel:'Timbang Barang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
+  if(warehouse&&['INBOUND','STORED','HOLD','DAMAGED'].includes(warehouseStatus))return {code:'GUDANG',label:warehouseStatus==='INBOUND'?'Terima Gudang':'Gudang Transit',rank:2,tone:warehouseStatus==='HOLD'||warehouseStatus==='DAMAGED'?'bad':'blue',nextLabel:'Timbang Barang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
   if(['PICKED_UP','AT_ORIGIN_HUB'].includes(tracking)||['IN_CUSTODY','AT_HUB','HANDOVER_PENDING'].includes(assignmentStatus))return {code:'MENUJU_GUDANG',label:'Menuju Gudang',rank:2,tone:'blue',nextLabel:'Terima Gudang',nextHref:`/admin-warehouse?booking=${encodeURIComponent(booking.bookingId)}`};
   if(assignment||tracking==='PICKUP_ASSIGNED')return {code:'PICKUP',label:'Pickup / Jemput',rank:1,tone:'warn',nextLabel:'Kelola Pickup',nextHref:`/admin-courier-assignment?booking=${encodeURIComponent(booking.bookingId)}`};
   return {code:'PESANAN',label:'Pesanan Masuk',rank:0,tone:'neutral',nextLabel:'Terima & Assign Pickup',nextHref:`/admin-courier-assignment?booking=${encodeURIComponent(booking.bookingId)}`};
