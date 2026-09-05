@@ -6,7 +6,7 @@ const num=(v,fallback=0)=>Number.isFinite(Number(v))?Number(v):fallback;
 const money=v=>Math.max(0,Math.round(num(v)));
 const kg2=v=>Math.max(0,Math.round(num(v)*100)/100);
 
-export const PHASE1_PTD_RULE_VERSION='2026-09-05.1';
+export const PHASE1_PTD_RULE_VERSION='2026-09-05.2';
 export const PHASE1_MARKETPLACE_RECEIVER='INDRI';
 export const PHASE1_PTD_ROUTE=Object.freeze({originHub:'CGK',destinationHub:'DJJ',product:'PORT_TO_DOOR'});
 export const PHASE1_PTD_SERVICES=Object.freeze({
