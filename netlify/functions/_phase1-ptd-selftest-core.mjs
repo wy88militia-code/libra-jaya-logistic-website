@@ -2,6 +2,7 @@ import { allocateOperationalCosts } from './_smu-cost-allocation-core.mjs';
 import { calculatePhase1PtpVendorBatchCost, phase1CustomerChargeableKg, resolveAirlinePtpCostPolicy } from './_phase1-ptd-core.mjs';
 import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, resolveDjjLastmileWeightBasis } from './_djj-lastmile-engine.mjs';
 import { allocateFinanceIncomingHandling } from './_finance-smu-handling-core.mjs';
+import { simulatePhase1PtpSelling } from './_phase1-final-pricing-core.mjs';
 import { calculateRateAmount } from './_rate-plan-core.mjs';
 
 function assert(name,condition,detail){if(!condition){const e=new Error(`${name}: ${detail}`);e.check=name;throw e;}return {name,status:'PASS',detail};}
@@ -18,6 +19,11 @@ export function runPhase1PtdSelfTest(){
   checks.push(assert('GARUDA_WAREHOUSE_INCLUDED',component({components:batch.components},'CGK_WAREHOUSE_HANDLING')?.amount===0,'Gudang keberangkatan terpisah = Rp0 karena termasuk PTP airline.'));
   checks.push(assert('AIRLINE_ADMIN_REPLACES_GENERIC_SMU',component({components:batch.components},'CGK_SMU_HANDLING')?.amount===0&&component({components:batch.components},'AIRLINE_ADMIN_SMU')?.amount===20000,'Admin airline Rp20.000/SMU menggantikan generic CGK SMU handling.'));
   checks.push(assert('GARUDA_BATCH_TOTAL',batch.total===862700,'12 kg × Rp70.225 + Rp20.000 admin = Rp862.700 tanpa RA/gudang dobel.'));
+
+  const marginSim=simulatePhase1PtpSelling({airlineRatePerKg:70225,customerChargeableKg:10,lastmileRatePerKg:7000,insuranceAmount:0,roundTo:1000,margins:[5,10,15,20]});
+  const m5=marginSim.find(x=>x.marginPct===5),m10=marginSim.find(x=>x.marginPct===10),m15=marginSim.find(x=>x.marginPct===15),m20=marginSim.find(x=>x.marginPct===20);
+  checks.push(assert('PTP_MARGIN_SIM_ROUNDING',m5?.ptpSellRatePerKg===74000&&m10?.ptpSellRatePerKg===78000&&m15?.ptpSellRatePerKg===81000&&m20?.ptpSellRatePerKg===85000,'Rate simulasi 5/10/15/20% dibulatkan ke Rp74k/Rp78k/Rp81k/Rp85k per kg sesuai roundTo Rp1.000.'));
+  checks.push(assert('PTP_MARGIN_SIM_NO_HIDDEN_SMU',m10?.ptpFreight===780000&&m10?.totalPreview===850000,'Simulasi 10 kg @10% menghasilkan PTP Rp780.000 + last-mile Rp70.000 tanpa admin/SMU disisipkan penuh per booking.'));
 
   const allocated=allocateOperationalCosts([
     {bookingId:'TEST-A',hubCode:'CGK',chargeableWeightKg:3,smuNumber:'SMU-PHASE1-TEST',isLastmileIncoming:true,airlinePtpPolicy:garudaPolicy},
@@ -56,5 +62,5 @@ export function runPhase1PtdSelfTest(){
   const ptpOnly=allocateFinanceIncomingHandling([{bookingId:'PTP-ONLY',serviceType:'PTP',requiresLastmile:false,chargeableWeightKg:20}],new Map([['PTP-ONLY',{smuNumbers:['SMU-PTP']}]]));
   checks.push(assert('FINANCE_PTP_EXCLUDED',ptpOnly.smuCount===0&&ptpOnly.total===0,'Booking PTP-only tidak terkena handling incoming last-mile.'));
 
-  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
+  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,ptpSell10PctPerKg:m10?.ptpSellRatePerKg||0,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
 }
