@@ -17,6 +17,7 @@ function manifestBookingMap(manifests=[]){
   return out;
 }
 function currentTracking(booking){return String(booking?.currentTrackingStatus||booking?.status||'').toUpperCase();}
+function hasFinalPrice(booking){const amount=Number(booking?.amount);return Number.isFinite(amount)&&amount>0&&!['PENDING_FINAL_WEIGHT','PENDING_PRICING','RATE_REVIEW_REQUIRED'].includes(String(booking?.pricingStatus||'').toUpperCase());}
 
 export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}={}){
   const bookingStatus=String(booking?.status||'').toUpperCase();
@@ -31,6 +32,7 @@ export function deriveSoettaStage({booking,assignment,warehouse,weight,manifest}
   if(manifest&&['OPEN','CLOSED'].includes(manifestStatus))return {code:'SMU',label:'SMU / Manifest',rank:5,tone:'blue',nextLabel:'Kelola SMU',nextHref:'/admin-manifests'};
   if(weight?.status==='VERIFIED'){
     if(weightStatus==='WEIGHT_ADJUSTMENT'||weight?.billingReviewRequired)return {code:'WEIGHT_ADJUSTMENT',label:'Perlu Approval Berat',rank:3,tone:'warn',nextLabel:'Review Timbang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
+    if(!hasFinalPrice(booking))return {code:'FINAL_PRICING',label:'Menunggu Harga Final',rank:4,tone:'warn',nextLabel:'Cek Berat Final',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
     return {code:'SIAP_FAKTUR',label:'Siap Faktur',rank:4,tone:'good',nextLabel:'Data Faktur Siap',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
   }
   if(warehouse&&['INBOUND','STORED','HOLD','DAMAGED'].includes(warehouseStatus))return {code:'GUDANG',label:warehouseStatus==='INBOUND'?'Terima Gudang':'Gudang Transit',rank:2,tone:warehouseStatus==='HOLD'||warehouseStatus==='DAMAGED'?'bad':'blue',nextLabel:'Timbang Barang',nextHref:`/admin-weights?booking=${encodeURIComponent(booking.bookingId)}`};
@@ -62,6 +64,7 @@ export async function buildJlxSoettaQueue(limit=400){
     menujuGudang:count('MENUJU_GUDANG'),
     gudang:count('GUDANG'),
     weightAdjustment:count('WEIGHT_ADJUSTMENT'),
+    finalPricing:count('FINAL_PRICING'),
     siapFaktur:count('SIAP_FAKTUR'),
     smu:count('SMU'),
     berangkat:count('BERANGKAT'),
