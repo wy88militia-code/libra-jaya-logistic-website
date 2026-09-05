@@ -4,6 +4,7 @@ import { cleanParty, getBooking, newBookingId, reserveIdempotency, saveBooking }
 import { getMasterSnapshot } from './_master-sheet-core.mjs';
 import { createOperationalNotification } from './_notification-core.mjs';
 import { getPartner, normalizePartnerId } from './_partner-core.mjs';
+import { assertDjjLastmileRoute, djjLastmileMetadata } from './_djj-lastmile-engine.mjs';
 
 const AUDIT_STORE='libra-soetta-booking-audit';
 const auditStore=()=>getStore(AUDIT_STORE);
@@ -27,7 +28,7 @@ export const SOETTA_SERVICE_LEVELS=Object.freeze({
 
 export function resolveSoettaServiceType(value){return SOETTA_SERVICE_TYPES[upper(value)]||null;}
 export function resolveSoettaServiceLevel(value){return SOETTA_SERVICE_LEVELS[upper(value)]||null;}
-function hubCode(value){const v=upper(value);if(v.includes('WMX')||v.includes('WAMENA'))return 'WMX';if(v.includes('OKS')||v.includes('OKSIBIL'))return 'OKS';if(v.includes('DEX')||v.includes('DEKAI'))return 'DEX';if(v.includes('DJJ')||v.includes('SENTANI')||v.includes('DORTHEYS'))return 'DJJ';return v.replace(/[^A-Z0-9]/g,'').slice(0,12)||'DJJ';}
+function hubCode(value){const v=upper(value);if(v.includes('WMX')||v.includes('WAMENA'))return 'WMX';if(v.includes('OKS')||v.includes('OKSIBIL'))return 'OKS';if(v.includes('DEX')||v.includes('DEKAI'))return 'DEX';if(v.includes('DJJ')||v.includes('SENTANI')||v.includes('DORTHEYS')||v.includes('JAYAPURA'))return 'DJJ';return v.replace(/[^A-Z0-9]/g,'').slice(0,12)||'DJJ';}
 
 function coord(input,prefix='destination'){
   const latitude=finite(input?.[`${prefix}Latitude`]),longitude=finite(input?.[`${prefix}Longitude`]),accuracy=finite(input?.[`${prefix}AccuracyMeters`]);
@@ -40,11 +41,12 @@ async function activeRoute(kodeRute){
   const snapshot=await getMasterSnapshot();if(!snapshot)throw new Error('Master rute belum dipublish.');
   const route=(snapshot.routes||[]).find(r=>String(r.kodeRute||'')===String(kodeRute||''));if(!route)throw new Error('Rute tujuan tidak ditemukan pada Master.');
   if(String(route.coverageStatus||'').toUpperCase()!=='ACTIVE')throw new Error(`Rute ${route.kodeRute} belum ACTIVE: ${route.coverageReason||route.coverageStatus||'review operasional'}.`);
+  assertDjjLastmileRoute(route);
   return {route,snapshot};
 }
 async function appendAudit(booking,actor='ops'){
   const store=auditStore(),headKey=`head/${booking.bookingId}`,head=await store.get(headKey,{type:'json',consistency:'strong'}),createdAt=now();
-  const event={eventId:`SOB-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,bookingId:booking.bookingId,type:'SOETTA_BOOKING_CREATED',actor:clean(actor,100),source:booking.source,partnerId:booking.partnerId||null,serviceType:booking.serviceType,serviceLevel:booking.serviceLevel,weightKg:booking.weightKg,packageCount:booking.packageCount,pricingStatus:booking.pricingStatus,previousEventHash:head?.eventHash||null,createdAt};
+  const event={eventId:`SOB-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,bookingId:booking.bookingId,type:'SOETTA_BOOKING_CREATED',actor:clean(actor,100),source:booking.source,partnerId:booking.partnerId||null,serviceType:booking.serviceType,serviceLevel:booking.serviceLevel,lastmileEngineId:booking.lastmileEngine?.id||null,weightKg:booking.weightKg,packageCount:booking.packageCount,pricingStatus:booking.pricingStatus,previousEventHash:head?.eventHash||null,createdAt};
   event.eventHash=sha(JSON.stringify(event));await store.setJSON(`event/${booking.bookingId}/${createdAt}-${event.eventId}`,event,{onlyIfNew:true});await store.setJSON(headKey,{eventId:event.eventId,eventHash:event.eventHash,createdAt});return event;
 }
 
@@ -58,7 +60,7 @@ export async function createSoettaAdminBooking(input={},session={}){
   let partner=null;if(partnerId){partner=await getPartner(partnerId);if(!partner||partner.status!=='ACTIVE')throw new Error('Partner tidak ditemukan atau belum ACTIVE.');}
   let route=null,snapshot=null,destination=null,destinationHub='DJJ',viaHub=null;
   if(type.requiresLastmile){
-    ({route,snapshot}=await activeRoute(input.kodeRute));const point=coord(input,'destination');if(!point)throw new Error('Layanan ke Door wajib titik GPS tujuan penerima.');destinationHub=hubCode(route.bandaraAsal||route.hub||'DJJ');viaHub=destinationHub!=='DJJ'?'DJJ':null;
+    ({route,snapshot}=await activeRoute(input.kodeRute));const point=coord(input,'destination');if(!point)throw new Error('Layanan ke Door wajib titik GPS tujuan penerima.');destinationHub='DJJ';viaHub=null;
     destination={kodeWilayah:route.kodeWilayah||null,kelurahan:route.kelurahan||null,distrik:route.distrik||null,kabupatenKota:route.kabupatenKota||null,provinsi:route.provinsi||null,...point,confirmedKelurahan:true,coordinateSource:'ADMIN_CUSTOMER_LOCATION'};
   }else{
     const destinationCode=hubCode(input.destinationPortCode||'DJJ');if(destinationCode!=='DJJ')throw new Error('Pilot Port dari Soetta saat ini dikunci ke DJJ. Rute lain aktif setelah master airline/service dipublish.');destinationHub='DJJ';destination={kodeWilayah:null,kelurahan:'PORT DJJ / BANDARA SENTANI',distrik:'SENTANI',kabupatenKota:'KABUPATEN JAYAPURA',provinsi:'PAPUA',confirmedKelurahan:false,portDelivery:true};
@@ -69,14 +71,15 @@ export async function createSoettaAdminBooking(input={},session={}){
     bookingId:proposedId,partnerId:partnerId||null,customerType:partnerId?'PARTNER':'COUNTER_DIRECT',status:'BOOKED',source:'JLX_SOETTA_ADMIN',idempotencyKey:requestToken,
     partnerReference:clean(input.partnerReference,120),sender,recipient,destination,pickup,originHub:'CGK',viaHub,destinationHub,
     kodeRute:route?.kodeRute||`CGK-${destinationHub}`,kodeWilayah:route?.kodeWilayah||null,service:`${type.code}_${level.code}`,serviceType:type.code,serviceTypeLabel:type.label,serviceLevel:level.code,serviceLevelLabel:level.label,
-    requiresPickup:type.requiresPickup,requiresLastmile:type.requiresLastmile,weightKg,chargeableWeightKg:null,packageCount,cargoType:upper(input.cargoType||'GENERAL').slice(0,40)||'GENERAL',commodity:clean(input.commodity,160)||null,
+    requiresPickup:type.requiresPickup,requiresLastmile:type.requiresLastmile,lastmileEngine:type.requiresLastmile?djjLastmileMetadata('JLX_INTERNAL'):null,
+    weightKg,chargeableWeightKg:null,packageCount,cargoType:upper(input.cargoType||'GENERAL').slice(0,40)||'GENERAL',commodity:clean(input.commodity,160)||null,
     amount:null,currency:'IDR',pricingStatus:'PENDING_FINAL_WEIGHT',billingStatus:'PENDING_FINAL_WEIGHT',paymentStatus:'NOT_POSTED',walletDebited:false,financeAutoPost:false,
     customerMinimumChargeKg:level.customerMinimumChargeKg,sla:route?.slaTotalHub||route?.slaLastmile||route?.slaMaster||null,masterVersion:snapshot?.version||null,
     operationalNote:clean(input.operationalNote,500)||null,bookedAt:createdAt,createdAt,updatedAt:createdAt,createdByAdmin:clean(session.username||'ops',100),createdByRole:upper(session.role||'OPS'),
     financeGate:{status:'PENDING_FINAL_WEIGHT',autoPost:false,reason:'SOETTA_ADMIN_BOOKING_WAIT_FINAL_WEIGHT_AND_PRICING'},
   };
   const saved=await saveBooking(booking,{onlyIfNew:true});if(!saved.modified)throw new Error('Booking ID sudah ada. Ulangi proses.');await appendAudit(booking,session.username||'ops');
-  if(partnerId)try{await createOperationalNotification({partnerId,type:'BOOKING_CREATED',severity:'INFO',title:'Booking dibuat oleh Admin Soetta',message:`Booking ${booking.bookingId} • ${type.label} • ${level.label} • ${weightKg} kg telah diterima operasional Soetta. Harga final menunggu timbang/final pricing.`,reference:booking.bookingId,partnerLink:'/partner/history.html',adminLink:'/jlx-soetta',dedupeKey:`soetta-admin-booking:${booking.bookingId}`,metadata:{bookingId:booking.bookingId,serviceType:type.code,serviceLevel:level.code,source:booking.source}});}catch{}
+  if(partnerId)try{await createOperationalNotification({partnerId,type:'BOOKING_CREATED',severity:'INFO',title:'Booking dibuat oleh Admin Soetta',message:`Booking ${booking.bookingId} • ${type.label} • ${level.label} • ${weightKg} kg telah diterima operasional Soetta. Harga final menunggu timbang/final pricing.`,reference:booking.bookingId,partnerLink:'/partner/history.html',adminLink:'/jlx-soetta',dedupeKey:`soetta-admin-booking:${booking.bookingId}`,metadata:{bookingId:booking.bookingId,serviceType:type.code,serviceLevel:level.code,lastmileEngineId:booking.lastmileEngine?.id||null,source:booking.source}});}catch{}
   return {booking,duplicate:false};
 }
 
