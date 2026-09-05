@@ -23,7 +23,9 @@ export default async request=>{
  else{const configuredPin=process.env.ADMIN_PIN;if(configuredPin&&safeEqual(body?.pin??'',configuredPin)){const secret=process.env.ADMIN_TOTP_SECRET;if(secret){otpVerified=verifyTotp(body?.otp,secret);valid=otpVerified;}else valid=true;username=String(body?.username||'legacy-admin').trim().slice(0,80)||'legacy-admin';role='SUPERADMIN';}}
  if(!valid){await new Promise(resolve=>setTimeout(resolve,700));return Response.json({message:'Username, PIN, atau OTP salah. Akses ditolak.'},{status:401});}
  if(portal==='courier'&&!['COURIER','OPS','SUPERADMIN'].includes(role))return Response.json({message:'Akun ini tidak memiliki akses Portal Kurir.'},{status:403});
- const device=issueDevice(sessionSecret),expires=Math.floor(Date.now()/1000)+SESSION_SECONDS;const payload=Buffer.from(JSON.stringify({v:2,username,role,otp:otpVerified,deviceId:device.deviceId,expires,nonce:crypto.randomBytes(16).toString('hex')})).toString('base64url');const token=`${payload}.${sign(payload,sessionSecret)}`;const redirect=portal==='courier'?'/courier':'/libra-admin';
+ if(portal==='jlx-soetta'&&!['OPS','SUPERADMIN'].includes(role))return Response.json({message:'Akun ini tidak memiliki akses Operasional JL Express Soetta.'},{status:403});
+ const device=issueDevice(sessionSecret),expires=Math.floor(Date.now()/1000)+SESSION_SECONDS;const payload=Buffer.from(JSON.stringify({v:2,username,role,otp:otpVerified,deviceId:device.deviceId,expires,nonce:crypto.randomBytes(16).toString('hex')})).toString('base64url');const token=`${payload}.${sign(payload,sessionSecret)}`;
+ const redirect=portal==='courier'?'/courier':portal==='jlx-soetta'?'/jlx-soetta':'/libra-admin';
  const headers=new Headers({'content-type':'application/json; charset=utf-8','cache-control':'no-store'});headers.append('set-cookie',`${COOKIE_NAME}=${token}; Max-Age=${SESSION_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`);headers.append('set-cookie',`${DEVICE_COOKIE}=${device.token}; Max-Age=${DEVICE_SECONDS}; Path=/; HttpOnly; Secure; SameSite=Strict`);
  return new Response(JSON.stringify({ok:true,redirect,username,role,deviceBound:true}),{status:200,headers});
 };
