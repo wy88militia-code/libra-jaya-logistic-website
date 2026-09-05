@@ -1,0 +1,73 @@
+import crypto from 'node:crypto';
+import { getStore } from '@netlify/blobs';
+import { listAdminAudit, verifyAuditChain } from './_admin-audit-core.mjs';
+import { accurateAutoStatus, listAccurateAutoEvents } from './_accurate-auto-core.mjs';
+import { listApprovalRequests } from './_maker-checker-core.mjs';
+import { createOperationalNotification } from './_notification-core.mjs';
+import { getPartner, getWallet, listPartners } from './_partner-core.mjs';
+import { getSlaSummary } from './_sla-monitor-core.mjs';
+import { getLatestSystemHealth } from './_system-health-core.mjs';
+import { markSystemHeartbeat } from './_system-heartbeat-core.mjs';
+import { ticketSummary } from './_ticket-core.mjs';
+import { listIncidentEvents } from './_tracking-core.mjs';
+
+const STORE='libra-ai-control-tower';
+const store=()=>getStore(STORE);
+const now=()=>new Date().toISOString();
+const clean=(v,n=1200)=>String(v??'').trim().slice(0,n);
+const money=v=>Math.trunc(Number(v)||0);
+const countBy=(rows,keyFn)=>rows.reduce((o,row)=>{const key=clean(keyFn(row)||'UNKNOWN',100);o[key]=(o[key]||0)+1;return o;},{});
+const within=(value,startMs)=>{const t=new Date(value||0).getTime();return Number.isFinite(t)&&t>=startMs;};
+const hash=v=>crypto.createHash('sha256').update(JSON.stringify(v)).digest('hex').slice(0,20);
+
+export function aiControlTowerConfigStatus(){
+ const apiKey=String(process.env.OPENAI_API_KEY||'').trim();
+ return {configured:Boolean(apiKey),model:clean(process.env.LIBRA_AI_MODEL||'gpt-5.6-luna',80),mode:'READ_ONLY_AUDIT_SUPERVISOR',writesAllowed:false,secretsSentToModel:false};
+}
+
+function deterministicAssessment(snapshot){
+ let score=100;const findings=[],recommendations=[];let hardRed=false;
+ if(!snapshot.audit.chainValid){score=0;hardRed=true;findings.push('Audit chain tidak valid. Integritas audit harus diperiksa segera.');recommendations.push('Bekukan tindakan sensitif baru sampai Audit & Backup memastikan chain kembali valid atau penyebabnya terdokumentasi.');}
+ if(snapshot.health.overall==='CRITICAL'){score-=40;hardRed=true;findings.push('System Health berstatus CRITICAL.');recommendations.push('Buka System Connection Health dan selesaikan blocking FAIL terlebih dahulu.');}
+ else if(snapshot.health.overall==='DEGRADED'){score-=12;findings.push('System Health berstatus DEGRADED.');recommendations.push('Selesaikan WARNING/FAIL non-blocking sebelum berkembang menjadi gangguan produksi.');}
+ const a=snapshot.accurate.counts;
+ if(a.RECONCILE_REQUIRED){score-=Math.min(60,a.RECONCILE_REQUIRED*30);hardRed=true;findings.push(`${a.RECONCILE_REQUIRED} event Accurate membutuhkan rekonsiliasi.`);recommendations.push('Jangan blind retry. Periksa JV di Accurate lalu cocokkan nomor, tanggal, cabang dan baris debit/kredit.');}
+ if(a.POST_FAILED){score-=Math.min(40,a.POST_FAILED*20);findings.push(`${a.POST_FAILED} event Accurate POST_FAILED.`);recommendations.push('Periksa response deterministik Accurate dan perbaiki payload/mapping sebelum retry terkontrol.');}
+ if(a.EXCEPTION){score-=Math.min(24,a.EXCEPTION*8);findings.push(`${a.EXCEPTION} event Accurate masuk EXCEPTION.`);recommendations.push('Periksa sumber transaksi atau mapping yang belum didukung; jangan dipaksakan ke Accurate.');}
+ if(a.RETRY){score-=Math.min(15,a.RETRY*5);findings.push(`${a.RETRY} event Accurate masih RETRY.`);recommendations.push('Pastikan retry tidak berulang tanpa batas dan worker/connection kembali stabil.');}
+ if(snapshot.sla.red){score-=Math.min(24,snapshot.sla.red*8);findings.push(`${snapshot.sla.red} kiriman SLA RED.`);recommendations.push('OPS perlu eskalasi kiriman SLA RED dan perbarui tracking yang stale.');}
+ if(snapshot.tickets.red){score-=Math.min(15,snapshot.tickets.red*5);findings.push(`${snapshot.tickets.red} ticket customer service SLA RED.`);recommendations.push('Prioritaskan ticket SLA RED sebelum ticket reguler.');}
+ if(snapshot.audit.failed){score-=Math.min(20,snapshot.audit.failed*5);findings.push(`${snapshot.audit.failed} audit event berstatus gagal pada periode ini.`);recommendations.push('Review audit event gagal dan pastikan tindakan utama tidak meninggalkan state parsial.');}
+ if(snapshot.audit.ownerOverrides){score-=Math.min(8,snapshot.audit.ownerOverrides*2);findings.push(`${snapshot.audit.ownerOverrides} Owner Override tercatat.`);recommendations.push('Pastikan setiap Owner Override punya alasan bisnis dan bukti pendukung yang memadai.');}
+ if(snapshot.approvals.pending){score-=Math.min(10,snapshot.approvals.pending);findings.push(`${snapshot.approvals.pending} approval masih pending.`);}
+ score=Math.max(0,Math.min(100,score));const risk=hardRed||score<70?'RED':score<90?'YELLOW':'GREEN';
+ if(!findings.length)findings.push('Tidak ditemukan exception material pada snapshot yang diperiksa.');
+ if(!recommendations.length)recommendations.push('Pertahankan monitoring rutin; tidak ada tindakan korektif material saat ini.');
+ return {score,risk,findings,recommendations};
+}
+
+export async function buildControlTowerSnapshot({periodHours=24}={}){
+ const hours=Math.max(1,Math.min(Number(periodHours)||24,24*31)),endAt=now(),startAt=new Date(Date.now()-hours*3600000).toISOString(),startMs=new Date(startAt).getTime();
+ const [auditRows,chain,health,autoEvents,approvals,partners,sla,tickets,incidents]=await Promise.all([
+  listAdminAudit(1000).catch(()=>[]),verifyAuditChain(1000).catch(()=>({valid:false,checked:0,brokenAt:'VERIFY_ERROR'})),getLatestSystemHealth().catch(()=>null),listAccurateAutoEvents(500).catch(()=>[]),listApprovalRequests(500).catch(()=>[]),listPartners().catch(()=>[]),getSlaSummary().catch(()=>({})),ticketSummary().catch(()=>({})),listIncidentEvents(200).catch(()=>[])
+ ]);
+ const periodAudit=auditRows.filter(r=>within(r.createdAt,startMs)),periodAuto=autoEvents.filter(r=>within(r.updatedAt||r.createdAt,startMs)),periodIncidents=incidents.filter(r=>within(r.createdAt,startMs));
+ const walletRows=[];for(const p of partners.slice(0,500)){try{const w=await getWallet(p.partnerId);walletRows.push({status:p.status,balance:money(w.balance)});}catch{walletRows.push({status:p.status,balance:0});}}
+ const lowThreshold=Math.max(0,money(process.env.PARTNER_LOW_BALANCE_THRESHOLD||1000000));
+ const approvalPending=approvals.filter(r=>r.status==='PENDING'&&new Date(r.expiresAt||0).getTime()>Date.now()).length;
+ const snapshot={period:{hours,startAt,endAt},audit:{chainValid:Boolean(chain.valid),checked:chain.checked||0,brokenAt:chain.brokenAt||null,total:periodAudit.length,failed:periodAudit.filter(r=>String(r.status).toUpperCase()!=='SUCCESS').length,ownerOverrides:periodAudit.filter(r=>r.ownerOverride||/OWNER_OVERRIDE/i.test(String(r.action||''))).length,cancelled:periodAudit.filter(r=>/CANCEL/i.test(String(r.action||''))||String(r.status).toUpperCase()==='CANCELLED').length,actions:countBy(periodAudit,r=>r.action),roles:countBy(periodAudit,r=>r.role)},health:{overall:health?.overall||'UNKNOWN',summary:health?.summary||null,issues:(health?.checks||[]).filter(x=>['WARN','FAIL'].includes(x.status)).map(x=>({id:x.id,label:x.label,status:x.status,detail:clean(x.detail,300),blocking:x.blocking!==false})).slice(0,30),checkedAt:health?.checkedAt||null},accurate:{status:accurateAutoStatus(),counts:countBy(periodAuto,r=>r.status),total:periodAuto.length,readBackVerified:periodAuto.filter(r=>r.status==='POSTED'&&r.readBackVerified).length,unverifiedPosted:periodAuto.filter(r=>r.status==='POSTED'&&!r.readBackVerified).length},approvals:{pending:approvalPending,statuses:countBy(approvals,r=>r.status)},partners:{total:partners.length,active:partners.filter(p=>p.status==='ACTIVE').length,pending:partners.filter(p=>p.status==='PENDING').length,totalWalletBalance:walletRows.reduce((s,x)=>s+x.balance,0),lowBalanceThreshold:lowThreshold,lowBalance:walletRows.filter(x=>x.status==='ACTIVE'&&x.balance<=lowThreshold).length},sla:{active:Number(sla.active||0),green:Number(sla.green||0),yellow:Number(sla.yellow||0),red:Number(sla.red||0),error:Number(sla.error||0),breached:Number(sla.breached||0),onTimePct:sla.onTimePct??null},tickets:{open:Number(tickets.open||0),red:Number(tickets.red||0),yellow:Number(tickets.yellow||0),waitingInternal:Number(tickets.waitingInternal||0),responseBreached:Number(tickets.responseBreached||0),resolutionBreached:Number(tickets.resolutionBreached||0)},incidents:{periodTotal:periodIncidents.length,byStatus:countBy(periodIncidents,r=>r.status)}};
+ snapshot.assessment=deterministicAssessment(snapshot);snapshot.fingerprint=hash({risk:snapshot.assessment.risk,findings:snapshot.assessment.findings,health:snapshot.health.issues.map(x=>[x.id,x.status]),accurate:snapshot.accurate.counts,auditChain:snapshot.audit.chainValid});return snapshot;
+}
+
+function fallbackNarrative(snapshot,kind){const a=snapshot.assessment;return [`LIBRA AI CONTROL TOWER — ${kind}`,`Risk: ${a.risk} • Score ${a.score}/100`,`Audit Chain: ${snapshot.audit.chainValid?'VALID':'INVALID'}`,`System Health: ${snapshot.health.overall}`,`Accurate Auto: ${snapshot.accurate.total} event • POSTED ${snapshot.accurate.counts.POSTED||0} • RECONCILE ${snapshot.accurate.counts.RECONCILE_REQUIRED||0} • EXCEPTION ${snapshot.accurate.counts.EXCEPTION||0}`,`Audit event: ${snapshot.audit.total} • failed ${snapshot.audit.failed} • owner override ${snapshot.audit.ownerOverrides}`,`SLA: RED ${snapshot.sla.red} • YELLOW ${snapshot.sla.yellow}`,`Temuan: ${a.findings.join(' | ')}`,`Rekomendasi: ${a.recommendations.join(' | ')}`].join('\n');}
+function extractOutputText(data){if(typeof data?.output_text==='string'&&data.output_text.trim())return data.output_text.trim();const parts=[];for(const item of data?.output||[])for(const content of item?.content||[])if(content?.type==='output_text'&&content.text)parts.push(content.text);return parts.join('\n').trim();}
+async function aiNarrative(snapshot,kind){const cfg=aiControlTowerConfigStatus();if(!cfg.configured)return {used:false,model:cfg.model,text:fallbackNarrative(snapshot,kind),error:'OPENAI_API_KEY belum dikonfigurasi.'};
+ const compact={period:snapshot.period,audit:snapshot.audit,health:snapshot.health,accurate:snapshot.accurate,approvals:snapshot.approvals,partners:snapshot.partners,sla:snapshot.sla,tickets:snapshot.tickets,incidents:snapshot.incidents,deterministicAssessment:snapshot.assessment};
+ const instructions='Anda adalah Libra AI Control Tower, internal audit dan system-health supervisor PT Libra Jaya Logistic. Anda READ-ONLY. Gunakan hanya fakta dalam JSON input; jangan mengarang angka/penyebab. Bedakan fakta, indikasi, dan rekomendasi. Jangan menyarankan blind retry untuk status Accurate yang tidak pasti. Jangan menyarankan AI mengubah saldo, COA, tarif, jurnal, atau menghapus transaksi. Tulis ringkas dalam Bahasa Indonesia dengan bagian: Ringkasan Eksekutif, Temuan Utama, Koreksi/Recovery yang Aman, Perlu Tindakan Admin, Kesimpulan. Jika Audit Chain INVALID, jadikan itu prioritas tertinggi.';
+ try{const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{authorization:`Bearer ${String(process.env.OPENAI_API_KEY).trim()}`,'content-type':'application/json'},body:JSON.stringify({model:cfg.model,instructions,input:JSON.stringify(compact),max_output_tokens:1400})});const data=await response.json().catch(()=>({}));if(!response.ok)throw new Error(clean(data?.error?.message||`OpenAI HTTP ${response.status}`,400));const text=extractOutputText(data);if(!text)throw new Error('OpenAI tidak mengembalikan output text.');return {used:true,model:cfg.model,text,error:null,responseId:clean(data.id,120)||null};}catch(error){return {used:false,model:cfg.model,text:fallbackNarrative(snapshot,kind),error:clean(error?.message||error,500)};}}
+
+async function maybeNotify(previous,report){const changed=!previous||previous.risk!==report.risk||previous.fingerprint!==report.fingerprint;if(!changed)return;try{if(report.risk==='RED')await createOperationalNotification({type:'AI_CONTROL_TOWER_RED',severity:'CRITICAL',title:'AI Control Tower: sistem RED',message:`Risk score ${report.score}/100. ${report.snapshot.assessment.findings.slice(0,3).join(' ')}`,notifyPartner:false,notifyAdmin:true,adminLink:'/admin-ai-control-tower',dedupeKey:`ai-red:${report.fingerprint}:${report.createdAt.slice(0,13)}`,metadata:{risk:report.risk,score:report.score,fingerprint:report.fingerprint}});else if(report.risk==='GREEN'&&previous&&previous.risk!=='GREEN')await createOperationalNotification({type:'AI_CONTROL_TOWER_RECOVERED',severity:'SUCCESS',title:'AI Control Tower: kembali GREEN',message:`Risk score ${report.score}/100. Tidak ada kondisi RED aktif pada snapshot audit terbaru.`,notifyPartner:false,notifyAdmin:true,adminLink:'/admin-ai-control-tower',dedupeKey:`ai-green:${report.fingerprint}:${report.createdAt.slice(0,13)}`,metadata:{risk:report.risk,score:report.score}});}catch{}}
+
+export async function generateControlTowerReport({periodHours=24,kind='MANUAL',source='ADMIN'}={}){const snapshot=await buildControlTowerSnapshot({periodHours}),ai=await aiNarrative(snapshot,kind),createdAt=now(),reportId=`AIR-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,report={reportId,kind:clean(kind,30).toUpperCase(),source:clean(source,60),createdAt,period:snapshot.period,risk:snapshot.assessment.risk,score:snapshot.assessment.score,fingerprint:snapshot.fingerprint,aiUsed:ai.used,model:ai.model,aiError:ai.error||null,responseId:ai.responseId||null,narrative:clean(ai.text,12000),snapshot};const previous=await store().get('latest/current',{type:'json',consistency:'strong'}).catch(()=>null);await store().setJSON(`report/${createdAt}-${reportId}`,report,{onlyIfNew:true});await store().setJSON('latest/current',report);await markSystemHeartbeat('AI_CONTROL_TOWER',{status:'OK',message:`${report.kind} ${report.risk} ${report.score}/100`,metadata:{reportId,aiUsed:report.aiUsed,model:report.model}}).catch(()=>{});await maybeNotify(previous,report);return report;}
+export async function getLatestControlTowerReport(){return store().get('latest/current',{type:'json',consistency:'strong'});}
+export async function listControlTowerReports(limit=50){const {blobs}=await store().list({prefix:'report/'}),rows=[];for(const b of blobs.sort((a,b)=>b.key.localeCompare(a.key)).slice(0,Math.max(1,Math.min(Number(limit)||50,200)))){const row=await store().get(b.key,{type:'json'});if(row)rows.push(row);}return rows;}
