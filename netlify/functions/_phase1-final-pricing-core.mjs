@@ -13,6 +13,14 @@ function roundUp(value,step=1000){const s=Math.max(1,money(step)||1000);return M
 function serviceCode(booking={}){return upper(booking.serviceLevel)==='ONS'||upper(booking.service).includes('ONS')?'PTD_CGK_DJJ_ONS':'PTD_CGK_DJJ_REGULAR';}
 function declaredValue(booking={}){return money(booking.declaredValue??booking.goodsValue??booking.invoiceValue??booking.itemValue);}
 
+export function isPhase1JlxInternalBooking(booking={}){
+  const source=upper(booking.source),origin=upper(booking.originHub),destination=upper(booking.destinationHub||'DJJ'),channel=upper(booking.lastmileEngine?.channel);
+  if(['API','API_UAT','PARTNER_API'].includes(source)||channel==='PARTNER_API')return false;
+  if(origin&&origin!=='CGK')return false;
+  if(destination&&destination!=='DJJ')return false;
+  return upper(booking.serviceType)==='PTD'&&booking.requiresLastmile!==false;
+}
+
 export function simulatePhase1PtpSelling(input={}){
   const airlineRatePerKg=money(input.airlineRatePerKg),customerChargeableKg=kg(input.customerChargeableKg),lastmileRatePerKg=money(input.lastmileRatePerKg),insuranceAmount=money(input.insuranceAmount),roundTo=money(input.roundTo)||1000;
   const margins=[...new Set((Array.isArray(input.margins)?input.margins:[5,10,15,20]).map(x=>Math.round(num(x)*100)/100).filter(x=>x>0&&x<=60))].sort((a,b)=>a-b);
@@ -24,7 +32,7 @@ export function simulatePhase1PtpSelling(input={}){
 
 export async function getPhase1FinalPricingReadiness(bookingId,input={}){
   const booking=await getBooking(bookingId);if(!booking)throw new Error('Booking tidak ditemukan.');
-  if(upper(booking.serviceType)!=='PTD'||booking.requiresLastmile===false){const e=new Error('Pricing readiness ini khusus Tahap 1 Port-to-Door CGK→DJJ→last-mile.');e.code='NOT_PHASE1_PTD';throw e;}
+  if(!isPhase1JlxInternalBooking(booking)){const e=new Error('Pricing readiness CGK→DJJ ini hanya untuk JL Express internal dari Soetta. Partner API hanya memakai DJJ_LASTMILE_V1 dan tidak boleh masuk pricing airfreight CGK-DJJ.');e.code='NOT_PHASE1_JLX_INTERNAL';throw e;}
   const [approval,config,airline,master]=await Promise.all([getWeightApprovalState(bookingId),getJlPricingConfigSnapshot(),getPhase1CgkDjjRateSnapshot({airlineId:input.airlineId||booking.airlineId||'garuda-citilink',cargoType:upper(booking.cargoType)==='GENERAL'?'GENERAL':(input.cargoType||'GENERAL')}),getMasterSnapshot()]);
   const reasons=[];
   if(!approval.weight)reasons.push({code:'WEIGHT_NOT_VERIFIED',message:'Berat final Soetta belum terverifikasi.'});
