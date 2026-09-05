@@ -1,6 +1,7 @@
 import { accurateConfigStatus, resolveAccurateConnection, validateAccurateBranch } from './_accurate-core.mjs';
 import { buildPhase1NativeSiReadiness } from './_accurate-native-si-core.mjs';
 import { getPhase1NativeSiUatState } from './_accurate-native-si-uat-core.mjs';
+import { getPhase1NativeSiUatReadbackProof } from './_accurate-native-si-uat-readback-core.mjs';
 import { getBooking } from './_booking-core.mjs';
 import { phase1NativeSiWalletContract, verifyPhase1NativeSiWalletContract } from './_phase1-native-si-wallet-core.mjs';
 import { buildPhase1SettlementReadiness } from './_phase1-native-si-settlement-core.mjs';
@@ -15,11 +16,13 @@ const directArEnabled=()=>flag('ACCURATE_NATIVE_SI_DIRECT_AR_ENABLED');
 
 export async function buildPhase1NativeSiProductionReadiness(bookingId){
   const id=clean(bookingId,120);if(!id)throw new Error('Booking ID wajib.');
-  const [booking,nativeReadiness,uat,settlementReadiness]=await Promise.all([getBooking(id),buildPhase1NativeSiReadiness(id),getPhase1NativeSiUatState(id),buildPhase1SettlementReadiness(id)]);if(!booking)throw new Error('Booking tidak ditemukan.');
+  const [booking,nativeReadiness,uat,uatReadback,settlementReadiness]=await Promise.all([getBooking(id),buildPhase1NativeSiReadiness(id),getPhase1NativeSiUatState(id),getPhase1NativeSiUatReadbackProof(id),buildPhase1SettlementReadiness(id)]);if(!booking)throw new Error('Booking tidak ditemukan.');
   const reasons=[];
   if(!nativeReadiness.ready)reasons.push({code:'NATIVE_SI_MAPPING_NOT_READY',message:`Native SI mapping/payload belum READY: ${(nativeReadiness.reasons||[]).map(x=>x.code).join(', ')||'unknown blocker'}.`});
-  if(!uat||uat.status!=='EXECUTED'||uat.execution?.testOnly!==true)reasons.push({code:'NATIVE_SI_UAT_PROOF_REQUIRED',message:'Belum ada bukti Native Sales Invoice UAT berstatus EXECUTED + read-back pada database TEST untuk booking ini.'});
+  if(!uat||uat.status!=='EXECUTED'||uat.execution?.testOnly!==true)reasons.push({code:'NATIVE_SI_UAT_PROOF_REQUIRED',message:'Belum ada Native Sales Invoice UAT berstatus EXECUTED pada database TEST.'});
   if(uat?.status==='RECONCILE_REQUIRED')reasons.push({code:'NATIVE_SI_UAT_RECONCILE_REQUIRED',message:'UAT masih RECONCILE_REQUIRED. Cutover production diblokir sampai rekonsiliasi selesai.'});
+  if(!uatReadback||uatReadback.status!=='VERIFIED')reasons.push({code:'NATIVE_SI_UAT_READBACK_CERT_REQUIRED',message:'UAT wajib lolos sertifikasi read-back: nomor, customer, cabang, item dan total harus identik.'});
+  else if(uatReadback.draftFingerprint!==nativeReadiness.draftFingerprint)reasons.push({code:'NATIVE_SI_UAT_READBACK_STALE',message:'Sertifikat UAT berasal dari draft fingerprint lama. Jalankan UAT/read-back ulang untuk draft terbaru.'});
   const walletContract=verifyPhase1NativeSiWalletContract();if(!walletContract.ok)reasons.push({code:'LEGACY_JV_EXCLUSION_CONTRACT_FAILED',message:'Kontrak anti-double wallet → legacy auto-JV tidak valid.'});
   if(phase1NativeSiWalletContract().source==='BOOKING')reasons.push({code:'LEGACY_BOOKING_SOURCE_FORBIDDEN',message:'Native SI tidak boleh memakai wallet source BOOKING karena source itu diakui revenue oleh JV legacy.'});
 
@@ -39,12 +42,11 @@ export async function buildPhase1NativeSiProductionReadiness(bookingId){
 
   const ready=reasons.length===0;
   return {
-    bookingId:id,ready,status:ready?'READY_FOR_NATIVE_SI_PRODUCTION_EXECUTOR':'BLOCKED',reasons,
-    customerMode,
-    production:{nativeSiEnabled:productionEnabled(),nativeSiArmed:productionArmed(),actualDatabaseName,expectedDatabaseName:expected||null,branchName:config.branchName||'JLX Cargo',branchFound:Boolean(branch.ok),connectionError,postAvailable:false,note:'Readiness only. Modul ini tidak memiliki executor POST production.'},
-    uatProof:uat?.status==='EXECUTED'?{requestId:uat.requestId,databaseName:uat.execution?.databaseName||uat.databaseName,accurateNumber:uat.execution?.accurateNumber||null,accurateId:uat.execution?.accurateId??null,executedAt:uat.execution?.executedAt||null,testOnly:Boolean(uat.execution?.testOnly)}:null,
+    bookingId:id,ready,status:ready?'READY_FOR_NATIVE_SI_PRODUCTION_EXECUTOR':'BLOCKED',reasons,customerMode,
+    production:{nativeSiEnabled:productionEnabled(),nativeSiArmed:productionArmed(),actualDatabaseName,expectedDatabaseName:expected||null,branchName:config.branchName||'JLX Cargo',branchFound:Boolean(branch.ok),connectionError,postAvailable:false,note:'Readiness only. Production executor harus tetap memakai maker-checker dan duplicate/read-back guard.'},
+    uatProof:uat?.status==='EXECUTED'?{requestId:uat.requestId,databaseName:uat.execution?.databaseName||uat.databaseName,accurateNumber:uat.execution?.accurateNumber||null,accurateId:uat.execution?.accurateId??null,executedAt:uat.execution?.executedAt||null,testOnly:Boolean(uat.execution?.testOnly),strictReadbackVerified:Boolean(uatReadback?.status==='VERIFIED'),strictReadbackChecks:uatReadback?.verification?.checks||null,strictReadbackAt:uatReadback?.verifiedAt||null}:null,
     nativePayload:{ready:nativeReadiness.ready,draftId:nativeReadiness.draftId,draftFingerprint:nativeReadiness.draftFingerprint,draftTotal:nativeReadiness.draftTotal,customerNo:nativeReadiness.payloadPreview?.customerNo||null,itemCount:nativeReadiness.payloadPreview?.detailItem?.length||0,taxPolicyConfirmed:Boolean(nativeReadiness.accurate?.taxPolicyConfirmed)},
     settlement:{...settlementReadiness,partnerSettlementEnabled:partnerSettlementEnabled(),directArEnabled:directArEnabled(),walletContract:walletContract.contract,legacyAutoStrategy:'Dedicated source PHASE1_NATIVE_SI_SETTLEMENT + IGNORED marker. Never source BOOKING for Native SI settlement.',accountingGuard:customerMode==='PARTNER_DEPOSIT'?'BLOCKED until Libra wallet deposit is represented by reconcilable Accurate Sales Down Payment; do not fake settlement with bank Sales Receipt.':'Direct AR becomes authoritative in Accurate after verified Native SI; no local wallet mutation.'},
-    guard:'NO_PRODUCTION_POST_IMPLEMENTED',checkedAt:new Date().toISOString(),
+    guard:'PRODUCTION_POST_MUST_USE_STRICT_MAKER_CHECKER_DUPLICATE_READBACK',checkedAt:new Date().toISOString(),
   };
 }
