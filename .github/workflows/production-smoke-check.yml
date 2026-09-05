@@ -16,6 +16,41 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 12
     steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Syntax check critical production modules
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --check netlify/functions/_jl-master-core.mjs
+          node --check netlify/functions/_karantina-core.mjs
+          node --check netlify/functions/public-karantina-screen.mjs
+          node --check netlify/functions/_phase1-final-pricing-core.mjs
+          node --check netlify/functions/_backup-core.mjs
+          node --check netlify/functions/_api-auth.mjs
+
+      - name: Unit test Karantina screening guard
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import { screenKarantinaFromRules } from './netlify/functions/_karantina-core.mjs';
+          const rules=[
+            {RULE_ID:'KAR-ANM-001',DOMAIN:'HEWAN','KOMODITAS / KEYWORD':'daging, telur, susu, kulit hewan, tulang, madu, produk hewan','ASAL_SCOPE':'Antardaerah / antarpulau','TUJUAN_SCOPE':'Semua tujuan',STATUS_SCREENING:'WAJIB CEK KARANTINA',PRIORITAS:'HIGH',TERAKHIR_DICEK:'2026-09-05'},
+            {RULE_ID:'KAR-PAP-001',DOMAIN:'HEWAN-PAPUA','KOMODITAS / KEYWORD':'daging kerbau/sapi/ruminansia dan produk berisiko PMK','ASAL_SCOPE':'Luar Papua, termasuk Sulawesi Selatan/Jawa dan wilayah lain','TUJUAN_SCOPE':'Papua / Jayapura / Sentani',STATUS_SCREENING:'RESTRICTED - WAJIB VERIFIKASI UPT',PRIORITAS:'CRITICAL',TERAKHIR_DICEK:'2026-09-05'},
+            {RULE_ID:'KAR-FSH-001',DOMAIN:'IKAN','KOMODITAS / KEYWORD':'ikan, udang, kepiting, lobster, seafood','ASAL_SCOPE':'Antardaerah / antarpulau','TUJUAN_SCOPE':'Semua tujuan',STATUS_SCREENING:'WAJIB CEK KARANTINA',PRIORITAS:'HIGH',TERAKHIR_DICEK:'2026-09-05'},
+            {RULE_ID:'KAR-OPS-001',DOMAIN:'INTERNAL-JLX','KOMODITAS / KEYWORD':'Semua komoditas karantina / aturan dinamis',STATUS_SCREENING:'FRESHNESS CHECK',PRIORITAS:'CRITICAL',TERAKHIR_DICEK:'2026-09-05'}
+          ];
+          const meat=screenKarantinaFromRules({commodity:'Daging sapi',cargoType:'FRESH',origin:'Jakarta',destination:'Jayapura Papua'},rules);
+          if(meat.classification!=='KARANTINA_HEWAN'||!meat.requiresReview||!meat.holdRequired||!meat.matchedRules.some(r=>r.ruleId==='KAR-PAP-001'))throw new Error(`Daging sapi screening gagal: ${JSON.stringify(meat)}`);
+          const fish=screenKarantinaFromRules({commodity:'Ikan frozen',cargoType:'FROZEN',origin:'Jakarta',destination:'Jayapura'},rules);
+          if(fish.classification!=='KARANTINA_IKAN'||!fish.requiresReview)throw new Error(`Ikan screening gagal: ${JSON.stringify(fish)}`);
+          const general=screenKarantinaFromRules({commodity:'Barang elektronik',cargoType:'GENERAL',origin:'Jakarta',destination:'Jayapura'},rules);
+          if(general.requiresReview||general.classification!=='NONE')throw new Error(`False positive general cargo: ${JSON.stringify(general)}`);
+          console.log('Karantina guard tests PASS');
+          NODE
+
       - name: Wait for Netlify production release
         shell: bash
         env:
