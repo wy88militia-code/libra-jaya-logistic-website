@@ -4,7 +4,7 @@ import { buildJlxSoettaQueue } from './_jlx-soetta-core.mjs';
 function esc(v){return String(v??'').replace(/[&<>'"]/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;',"'":'&#39;','"':'&quot;'}[c]));}
 function kg(v){const n=Number(v);return Number.isFinite(n)?`${n.toLocaleString('id-ID',{maximumFractionDigits:2})} kg`:'—';}
 function money(v){const n=Number(v);return Number.isFinite(n)?`Rp${Math.trunc(n).toLocaleString('id-ID')}`:'—';}
-function date(v){if(!v)return '—';try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'short',timeStyle:'short',timeZone:'Asia/Jayapura'}).format(new Date(v));}catch{return String(v);}}
+function date(v){if(!v)return '—';try{return new Intl.DateTimeFormat('id-ID',{dateStyle:'short',timeStyle:'short',timeZone:'Asia/Jakarta'}).format(new Date(v))+' WIB';}catch{return String(v);}}
 function stagePill(stage){return `<span class="pill ${esc(stage.tone)}">${esc(stage.label)}</span>`;}
 function stepClass(stageRank,index){return index<stageRank?'done':index===stageRank?'active':'';}
 
