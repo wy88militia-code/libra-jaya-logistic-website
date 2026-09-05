@@ -42,7 +42,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation; do
+          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation /admin-audit-backup /admin-resilience; do
             code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://librajayalogistic.com${path}")"
             echo "${path} -> HTTP ${code}"
             case "${code}" in
@@ -50,3 +50,25 @@ jobs:
               *) echo "Unexpected HTTP status for ${path}"; exit 1 ;;
             esac
           done
+
+      - name: Smoke test Karantina Master screening
+        shell: bash
+        run: |
+          set -euo pipefail
+          url='https://librajayalogistic.com/.netlify/functions/public-karantina-screen'
+          body='{"commodity":"Daging sapi","cargoType":"FRESH","origin":"Jakarta","destination":"Jayapura Papua"}'
+          response="$(curl -fsS --max-time 20 -H 'Origin: https://jlexpress.id' -H 'Content-Type: application/json' --data "${body}" "${url}")"
+          echo "Karantina response: $(printf '%s' "${response}" | jq -c '{ok,status,classification,holdRequired,priority,matchedRules:[.matchedRules[]?.ruleId]}')"
+          test "$(printf '%s' "${response}" | jq -r '.ok')" = 'true'
+          test "$(printf '%s' "${response}" | jq -r '.classification')" = 'KARANTINA_HEWAN'
+          test "$(printf '%s' "${response}" | jq -r '.requiresReview')" = 'true'
+          test "$(printf '%s' "${response}" | jq -r '.holdRequired')" = 'true'
+          printf '%s' "${response}" | jq -e '.matchedRules | any(.ruleId == "KAR-PAP-001")' >/dev/null
+
+      - name: Reject foreign browser origin on Karantina endpoint
+        shell: bash
+        run: |
+          set -euo pipefail
+          code="$(curl -sS -o /tmp/karantina-origin.json -w '%{http_code}' --max-time 15 -H 'Origin: https://example.invalid' -H 'Content-Type: application/json' --data '{"commodity":"Daging sapi","origin":"Jakarta","destination":"Jayapura"}' 'https://librajayalogistic.com/.netlify/functions/public-karantina-screen')"
+          echo "Foreign origin -> HTTP ${code}"
+          test "${code}" = '403'
