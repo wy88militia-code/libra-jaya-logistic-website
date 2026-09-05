@@ -17,23 +17,23 @@ export async function listAdminAudit(limit=300){const {blobs}=await store().list
 
 export async function verifyAuditChain(limit=1000){
  const rows=await listAdminAudit(limit),head=await store().get('head/current',{type:'json',consistency:'strong'});
- if(!rows.length)return {valid:!head?.hash,checked:0,brokenAt:head?.hash?'HEAD_WITHOUT_EVENTS':null,lastHash:null,headHash:head?.hash||null,method:'HASH_LINK_WALK'};
+ if(!rows.length)return {valid:!head?.hash,checked:0,canonicalChecked:0,orphanCount:0,brokenAt:head?.hash?'HEAD_WITHOUT_EVENTS':null,lastHash:null,headHash:head?.hash||null,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'CLEAN'};
  const byHash=new Map();
  for(const row of rows){
   const {recordHash,...record}=row,calculated=hashRecord(record);
-  if(!recordHash||calculated!==recordHash)return {valid:false,checked:rows.length,brokenAt:row.auditId||'RECORD_HASH_MISMATCH',lastHash:null,headHash:head?.hash||null,method:'HASH_LINK_WALK'};
-  if(byHash.has(recordHash))return {valid:false,checked:rows.length,brokenAt:row.auditId||'DUPLICATE_RECORD_HASH',lastHash:null,headHash:head?.hash||null,method:'HASH_LINK_WALK'};
+  if(!recordHash||calculated!==recordHash)return {valid:false,checked:rows.length,canonicalChecked:0,orphanCount:0,brokenAt:row.auditId||'RECORD_HASH_MISMATCH',lastHash:null,headHash:head?.hash||null,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'FAIL'};
+  if(byHash.has(recordHash))return {valid:false,checked:rows.length,canonicalChecked:0,orphanCount:0,brokenAt:row.auditId||'DUPLICATE_RECORD_HASH',lastHash:null,headHash:head?.hash||null,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'FAIL'};
   byHash.set(recordHash,row);
  }
- if(!head?.hash)return {valid:false,checked:rows.length,brokenAt:'EVENTS_WITHOUT_HEAD',lastHash:null,headHash:null,method:'HASH_LINK_WALK'};
- const visited=new Set();let currentHash=head.hash,lastHash=head.hash,lastRow=null;
+ if(!head?.hash)return {valid:false,checked:rows.length,canonicalChecked:0,orphanCount:rows.length,brokenAt:'EVENTS_WITHOUT_HEAD',lastHash:null,headHash:null,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'FAIL'};
+ const visited=new Set();let currentHash=head.hash,lastRow=null;
  while(currentHash){
-  if(visited.has(currentHash))return {valid:false,checked:rows.length,brokenAt:'HASH_CYCLE',lastHash:currentHash,headHash:head.hash,method:'HASH_LINK_WALK'};
+  if(visited.has(currentHash))return {valid:false,checked:rows.length,canonicalChecked:visited.size,orphanCount:0,brokenAt:'HASH_CYCLE',lastHash:currentHash,headHash:head.hash,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'FAIL'};
   const row=byHash.get(currentHash);
-  if(!row)return {valid:false,checked:rows.length,brokenAt:'HEAD_OR_ANCESTOR_MISSING',lastHash:currentHash,headHash:head.hash,method:'HASH_LINK_WALK'};
+  if(!row)return {valid:false,checked:rows.length,canonicalChecked:visited.size,orphanCount:0,brokenAt:'HEAD_OR_ANCESTOR_MISSING',lastHash:currentHash,headHash:head.hash,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'FAIL'};
   visited.add(currentHash);lastRow=row;currentHash=row.prevHash||null;
  }
- if(head.auditId&&byHash.get(head.hash)?.auditId!==head.auditId)return {valid:false,checked:rows.length,brokenAt:'HEAD_AUDIT_ID_MISMATCH',lastHash:head.hash,headHash:head.hash,method:'HASH_LINK_WALK'};
- if(visited.size!==rows.length){const orphan=rows.find(r=>!visited.has(r.recordHash));return {valid:false,checked:rows.length,brokenAt:orphan?.auditId||'ORPHAN_EVENT',lastHash:head.hash,headHash:head.hash,method:'HASH_LINK_WALK'};}
- return {valid:true,checked:rows.length,brokenAt:null,lastHash:head.hash,headHash:head.hash,genesisAuditId:lastRow?.auditId||null,method:'HASH_LINK_WALK'};
+ if(head.auditId&&byHash.get(head.hash)?.auditId!==head.auditId)return {valid:false,checked:rows.length,canonicalChecked:visited.size,orphanCount:0,brokenAt:'HEAD_AUDIT_ID_MISMATCH',lastHash:head.hash,headHash:head.hash,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:'FAIL'};
+ const orphans=rows.filter(r=>!visited.has(r.recordHash));
+ return {valid:true,checked:rows.length,canonicalChecked:visited.size,orphanCount:orphans.length,orphanAuditIds:orphans.slice(0,10).map(r=>r.auditId),brokenAt:null,lastHash:head.hash,headHash:head.hash,genesisAuditId:lastRow?.auditId||null,method:'CANONICAL_HASH_LINK_WALK',hygieneStatus:orphans.length?'WARN':'CLEAN'};
 }
