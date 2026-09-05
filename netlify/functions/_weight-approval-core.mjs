@@ -17,22 +17,11 @@ const sha=v=>crypto.createHash('sha256').update(String(v)).digest('hex');
 
 export function weightFingerprint(weight={}){
   if(!weight?.bookingId)return null;
-  const payload={
-    bookingId:clean(weight.bookingId,120),
-    verifiedAt:clean(weight.verifiedAt,60),
-    reweighCount:Number(weight.reweighCount||0),
-    customerDeclaredWeightKg:kg(weight.customerDeclaredWeightKg),
-    finalChargeableWeightKg:kg(weight.libraFinalChargeableWeightKg??weight.chargeableWeightKg),
-    weightDeltaKg:kg(weight.weightDeltaKg),
-    weightStatus:clean(weight.weightStatus,40).toUpperCase(),
-    ruleVersion:clean(weight.ruleVersion,60),
-  };
+  const payload={bookingId:clean(weight.bookingId,120),verifiedAt:clean(weight.verifiedAt,60),reweighCount:Number(weight.reweighCount||0),customerDeclaredWeightKg:kg(weight.customerDeclaredWeightKg),finalChargeableWeightKg:kg(weight.libraFinalChargeableWeightKg??weight.chargeableWeightKg),weightDeltaKg:kg(weight.weightDeltaKg),weightStatus:clean(weight.weightStatus,40).toUpperCase(),ruleVersion:clean(weight.ruleVersion,60)};
   return sha(JSON.stringify(payload));
 }
 function stableEventHash(event){const copy={...event};delete copy.eventHash;return sha(JSON.stringify(copy));}
-async function appendEvent(bookingId,type,actor,metadata={}){
-  const head=await store().get(headKey(bookingId),{type:'json',consistency:'strong'}),createdAt=now(),event={eventId:`WAP-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,bookingId:clean(bookingId,120),type:clean(type,60).toUpperCase(),actor:clean(actor,100)||null,metadata,previousEventHash:head?.eventHash||null,createdAt};event.eventHash=stableEventHash(event);await store().setJSON(eventKey(bookingId,createdAt,event.eventId),event,{onlyIfNew:true});await store().setJSON(headKey(bookingId),{eventId:event.eventId,eventHash:event.eventHash,createdAt});return event;
-}
+async function appendEvent(bookingId,type,actor,metadata={}){const head=await store().get(headKey(bookingId),{type:'json',consistency:'strong'}),createdAt=now(),event={eventId:`WAP-${Date.now()}-${crypto.randomBytes(4).toString('hex')}`,bookingId:clean(bookingId,120),type:clean(type,60).toUpperCase(),actor:clean(actor,100)||null,metadata,previousEventHash:head?.eventHash||null,createdAt};event.eventHash=stableEventHash(event);await store().setJSON(eventKey(bookingId,createdAt,event.eventId),event,{onlyIfNew:true});await store().setJSON(headKey(bookingId),{eventId:event.eventId,eventHash:event.eventHash,createdAt});return event;}
 
 export async function getWeightApprovalState(bookingId){
   const id=clean(bookingId,120);if(!id)return {bookingId:id,status:'NO_BOOKING_ID',approvalRequired:false,continuationAllowed:false};
@@ -48,18 +37,14 @@ export async function getWeightApprovalState(bookingId){
 export async function decideWeightAdjustment(input={},partner={}){
   const bookingId=clean(input.bookingId,120),partnerId=normalizePartnerId(partner?.partnerId),decision=clean(input.decision,20).toUpperCase(),note=clean(input.note,500),expectedFingerprint=clean(input.fingerprint,128);
   if(!bookingId||!partnerId)throw new Error('Booking/partner tidak valid.');if(!['APPROVED','REJECTED'].includes(decision))throw new Error('Keputusan approval tidak valid.');
-  const state=await getWeightApprovalState(bookingId);if(!state.booking)throw new Error('Booking tidak ditemukan.');if(normalizePartnerId(state.booking.partnerId)!==partnerId)throw new Error('Booking ini bukan milik partner yang sedang login.');if(!state.approvalRequired)throw new Error('Booking tidak memerlukan persetujuan selisih berat.');if(!expectedFingerprint||expectedFingerprint!==state.fingerprint)throw new Error('Data timbang telah berubah. Muat ulang halaman sebelum memberi keputusan.');
-  if(state.approval?.fingerprint===state.fingerprint&&state.approval?.decision===decision)return {...state.approval,idempotent:true};
+  const state=await getWeightApprovalState(bookingId);if(!state.booking)throw new Error('Booking tidak ditemukan.');if(normalizePartnerId(state.booking.partnerId)!==partnerId)throw new Error('Booking ini bukan milik partner yang sedang login.');if(!state.approvalRequired)throw new Error('Booking tidak memerlukan persetujuan selisih berat.');if(!expectedFingerprint||expectedFingerprint!==state.fingerprint)throw new Error('Data timbang telah berubah. Muat ulang halaman sebelum memberi keputusan.');if(state.approval?.fingerprint===state.fingerprint&&state.approval?.decision===decision)return {...state.approval,idempotent:true};if(state.approval?.fingerprint===state.fingerprint&&state.approval?.decision&&state.approval.decision!==decision)throw new Error(`Keputusan ${state.approval.decision} sudah tersimpan untuk hasil timbang ini. Reweigh/tindak lanjut OPS diperlukan sebelum keputusan berbeda.`);
+  const latestEntry=await store().getWithMetadata(latestKey(bookingId),{type:'json',consistency:'strong'}),latest=latestEntry?.data;if(latest?.fingerprint===state.fingerprint&&latest?.decision){if(latest.decision===decision)return {...latest,idempotent:true};throw new Error(`Keputusan ${latest.decision} sudah tersimpan untuk hasil timbang ini.`);}
   const createdAt=now(),approvalId=`WAPR-${Date.now()}-${crypto.randomBytes(5).toString('hex').toUpperCase()}`,row={approvalId,bookingId,partnerId,fingerprint:state.fingerprint,decision,customerDeclaredWeightKg:kg(state.weight.customerDeclaredWeightKg),libraFinalChargeableWeightKg:kg(state.weight.libraFinalChargeableWeightKg??state.weight.chargeableWeightKg),weightDeltaKg:kg(state.weight.weightDeltaKg),weightStatus:state.weight.weightStatus,ruleVersion:state.weight.ruleVersion||null,verifiedAt:state.weight.verifiedAt,reweighCount:Number(state.weight.reweighCount||0),note:note||null,decidedAt:createdAt,decidedByPartnerId:partnerId,source:'AUTHENTICATED_PARTNER_PORTAL'};
-  await store().setJSON(historyKey(bookingId,state.fingerprint,createdAt,approvalId),row,{onlyIfNew:true});await store().setJSON(latestKey(bookingId),row);await appendEvent(bookingId,decision==='APPROVED'?'WEIGHT_ADJUSTMENT_APPROVED':'WEIGHT_ADJUSTMENT_REJECTED',partnerId,{approvalId,fingerprint:state.fingerprint,weightDeltaKg:row.weightDeltaKg,finalChargeableWeightKg:row.libraFinalChargeableWeightKg});return row;
+  const lockResult=latestEntry?.etag?await store().setJSON(latestKey(bookingId),row,{onlyIfMatch:latestEntry.etag}):await store().setJSON(latestKey(bookingId),row,{onlyIfNew:true});if(!lockResult.modified)throw new Error('Keputusan sedang diproses di perangkat lain. Muat ulang halaman.');
+  await store().setJSON(historyKey(bookingId,state.fingerprint,createdAt,approvalId),row,{onlyIfNew:true});await appendEvent(bookingId,decision==='APPROVED'?'WEIGHT_ADJUSTMENT_APPROVED':'WEIGHT_ADJUSTMENT_REJECTED',partnerId,{approvalId,fingerprint:state.fingerprint,weightDeltaKg:row.weightDeltaKg,finalChargeableWeightKg:row.libraFinalChargeableWeightKg});return row;
 }
 
-export async function assertWeightApprovedForContinuation(bookingId){
-  const state=await getWeightApprovalState(bookingId);if(!state.weight)throw new Error(`Booking ${bookingId} belum memiliki verified weight.`);if(state.continuationAllowed)return state;
-  if(state.status==='REJECTED')throw new Error(`Booking ${bookingId}: customer menolak penyesuaian berat terbaru.`);
-  if(state.approvalRequired)throw new Error(`Booking ${bookingId}: selisih berat ≥0,20 kg menunggu approval customer/partner.`);
-  throw new Error(`Booking ${bookingId}: berat belum memenuhi syarat untuk dilanjutkan.`);
-}
+export async function assertWeightApprovedForContinuation(bookingId){const state=await getWeightApprovalState(bookingId);if(!state.weight)throw new Error(`Booking ${bookingId} belum memiliki verified weight.`);if(state.continuationAllowed)return state;if(state.status==='REJECTED')throw new Error(`Booking ${bookingId}: customer menolak penyesuaian berat terbaru.`);if(state.approvalRequired)throw new Error(`Booking ${bookingId}: selisih berat ≥0,20 kg menunggu approval customer/partner.`);throw new Error(`Booking ${bookingId}: berat belum memenuhi syarat untuk dilanjutkan.`);}
 
 export async function listWeightApprovalEvents(bookingId,limit=200){const {blobs}=await store().list({prefix:`event/${clean(bookingId,120)}/`}),rows=[];for(const b of blobs.sort((a,b)=>a.key.localeCompare(b.key)).slice(-Math.min(Math.max(1,Number(limit)||200),500))){const r=await store().get(b.key,{type:'json'});if(r)rows.push(r);}return rows;}
 export async function verifyWeightApprovalChain(bookingId){const rows=await listWeightApprovalEvents(bookingId,500);let previous=null;for(const row of rows){if((row.previousEventHash||null)!==previous)return {ok:false,eventId:row.eventId,reason:'PREVIOUS_HASH_MISMATCH'};if(stableEventHash(row)!==row.eventHash)return {ok:false,eventId:row.eventId,reason:'EVENT_HASH_MISMATCH'};previous=row.eventHash;}return {ok:true,count:rows.length,headHash:previous};}
