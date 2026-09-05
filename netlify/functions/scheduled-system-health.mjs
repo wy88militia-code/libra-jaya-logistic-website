@@ -5,7 +5,7 @@ import { getLatestSystemHealth, runSystemHealth } from './_system-health-core.mj
 async function notify(previous,current){
   const changed=!previous||previous.overall!==current.overall||previous.issueFingerprint!==current.issueFingerprint;if(!changed)return;
   let input=null;
-  if(current.overall==='HEALTHY'&&previous&&previous.overall!=='HEALTHY')input={type:'SYSTEM_HEALTH_RECOVERED',severity:'SUCCESS',title:'System Libra kembali normal',message:'Semua koneksi operasional yang dipantau kembali hijau. Accurate tetap manual/non-blocking.'};
+  if(current.overall==='HEALTHY'&&previous&&previous.overall!=='HEALTHY')input={type:'SYSTEM_HEALTH_RECOVERED',severity:'SUCCESS',title:'System Libra kembali normal',message:'Semua koneksi blocking yang dipantau kembali hijau. Accurate Full Auto ikut dinilai oleh System Health.'};
   else if(current.overall!=='HEALTHY'){
     const bad=current.checks.filter(x=>['WARN','FAIL'].includes(x.status)),list=bad.slice(0,5).map(x=>`${x.label}: ${x.status}`).join(' • ');
     input={type:'SYSTEM_HEALTH_ALERT',severity:current.overall==='CRITICAL'?'CRITICAL':'WARNING',title:current.overall==='CRITICAL'?'Gangguan koneksi sistem Libra':'System Libra perlu perhatian',message:`${list}${bad.length>5?` • +${bad.length-5} lainnya`:''}. Buka System Health untuk detail.`};
