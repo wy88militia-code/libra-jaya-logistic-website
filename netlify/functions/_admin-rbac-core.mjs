@@ -17,6 +17,7 @@ const PATH_ROLES=[
  [/^\/admin-maps(?:-pilot)?$/,['SUPERADMIN','OPS']],
  [/^\/admin-consolidation$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-bookings$/,['SUPERADMIN','OPS','CUSTOMER_SERVICE']],
+ [/^\/admin-lastmile-djj$/,['SUPERADMIN','OPS']],
  [/^\/admin-courier$/,['SUPERADMIN','OPS']],
  [/^\/admin-courier-assignment$/,['SUPERADMIN','OPS']],
  [/^\/admin-manifests$/,['SUPERADMIN','OPS']],
