@@ -35,8 +35,8 @@ function countStatuses(rows){return rows.reduce((o,r)=>{const k=String(r?.status
 
 export async function buildSystemHealth(){
   const checkedAt=now();
-  const [master,lastMaster,vendor,lastVendor,sla,backups,hSla,hMin,hAlert,hBackup,hAi,accurateEvents]=await Promise.all([
-    getMasterSnapshot().catch(()=>null),getLastMasterSync().catch(()=>null),getVendorMaster().catch(()=>null),getLastVendorSync().catch(()=>null),getSlaSummary().catch(()=>null),listBackups(5).catch(()=>[]),getSystemHeartbeat('SLA_MONITOR').catch(()=>null),getSystemHeartbeat('MINIMUM_LOAD').catch(()=>null),getSystemHeartbeat('ALERT_WORKER').catch(()=>null),getSystemHeartbeat('DAILY_BACKUP').catch(()=>null),getSystemHeartbeat('AI_CONTROL_TOWER').catch(()=>null),listAccurateAutoEvents(200).catch(()=>[])
+  const [master,lastMaster,vendor,lastVendor,sla,backups,hSla,hMin,hAlert,hBackup,hAccurate,hAi,accurateEvents]=await Promise.all([
+    getMasterSnapshot().catch(()=>null),getLastMasterSync().catch(()=>null),getVendorMaster().catch(()=>null),getLastVendorSync().catch(()=>null),getSlaSummary().catch(()=>null),listBackups(5).catch(()=>[]),getSystemHeartbeat('SLA_MONITOR').catch(()=>null),getSystemHeartbeat('MINIMUM_LOAD').catch(()=>null),getSystemHeartbeat('ALERT_WORKER').catch(()=>null),getSystemHeartbeat('DAILY_BACKUP').catch(()=>null),getSystemHeartbeat('ACCURATE_AUTO').catch(()=>null),getSystemHeartbeat('AI_CONTROL_TOWER').catch(()=>null),listAccurateAutoEvents(200).catch(()=>[])
   ]);
   const maps=mapsConfigStatus(),alerts=externalAlertConfig(),offsite=offsiteBackupConfig(),accurate=accurateAutoStatus();
   const checks=[];
@@ -76,6 +76,7 @@ export async function buildSystemHealth(){
   checks.push(workerCheck('ALERT_WORKER','Alert Delivery Worker',hAlert,{pass:5,warn:12,link:'/admin-resilience',blocking:false}));
   checks.push(workerCheck('SLA_MONITOR','SLA Monitor Worker',hSla,{pass:35,warn:65,link:'/admin-sla-control'}));
   checks.push(workerCheck('MINIMUM_LOAD','Minimum Load Worker',hMin,{pass:35,warn:65,link:'/admin-consolidation'}));
+  checks.push(workerCheck('ACCURATE_AUTO_WORKER','Accurate Auto Worker',hAccurate,{pass:8,warn:15,link:'/admin-accurate/auto'}));
   checks.push(workerCheck('AI_CONTROL_TOWER','AI Control Tower',hAi,{pass:90,warn:180,link:'/admin-ai-control-tower',blocking:false}));
 
   const latestBackup=backups?.[0]||null,backupAge=ageMin(latestBackup?.createdAt);
