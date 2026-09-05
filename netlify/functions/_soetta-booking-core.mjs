@@ -27,6 +27,7 @@ export const SOETTA_SERVICE_LEVELS=Object.freeze({
 
 export function resolveSoettaServiceType(value){return SOETTA_SERVICE_TYPES[upper(value)]||null;}
 export function resolveSoettaServiceLevel(value){return SOETTA_SERVICE_LEVELS[upper(value)]||null;}
+function hubCode(value){const v=upper(value);if(v.includes('WMX')||v.includes('WAMENA'))return 'WMX';if(v.includes('OKS')||v.includes('OKSIBIL'))return 'OKS';if(v.includes('DEX')||v.includes('DEKAI'))return 'DEX';if(v.includes('DJJ')||v.includes('SENTANI')||v.includes('DORTHEYS'))return 'DJJ';return v.replace(/[^A-Z0-9]/g,'').slice(0,12)||'DJJ';}
 
 function coord(input,prefix='destination'){
   const latitude=finite(input?.[`${prefix}Latitude`]),longitude=finite(input?.[`${prefix}Longitude`]),accuracy=finite(input?.[`${prefix}AccuracyMeters`]);
@@ -53,13 +54,14 @@ export async function createSoettaAdminBooking(input={},session={}){
   const weightKg=kg(input.weightKg),packageCount=Math.trunc(Number(input.packageCount||1));if(!(weightKg>0&&weightKg<=100000))throw new Error('Berat booking tidak valid.');if(!Number.isInteger(packageCount)||packageCount<1||packageCount>10000)throw new Error('Jumlah koli tidak valid.');
   const sender=cleanParty({name:input.senderName,phone:input.senderPhone,address:input.senderAddress,reference:input.senderReference}),recipient=cleanParty({name:input.recipientName,phone:input.recipientPhone,address:input.recipientAddress,reference:input.recipientReference});
   if(!sender.name||!sender.phone)throw new Error('Nama dan HP pengirim wajib diisi.');if(!recipient.name||!recipient.phone)throw new Error('Nama dan HP penerima wajib diisi.');if(type.requiresPickup&&!sender.address)throw new Error('Layanan Door wajib alamat pickup/pengirim.');if(type.requiresLastmile&&!recipient.address)throw new Error('Layanan ke Door wajib alamat lengkap penerima.');
-  const partnerId=normalizePartnerId(input.partnerId);let partner=null;if(partnerId){partner=await getPartner(partnerId);if(!partner||partner.status!=='ACTIVE')throw new Error('Partner tidak ditemukan atau belum ACTIVE.');}
+  const customerMode=upper(input.customerMode||'DIRECT');let partnerId=normalizePartnerId(input.partnerId);if(customerMode==='PARTNER'&&!partnerId)throw new Error('Pilih partner aktif untuk booking Partner Libra.');if(customerMode!=='PARTNER')partnerId='';
+  let partner=null;if(partnerId){partner=await getPartner(partnerId);if(!partner||partner.status!=='ACTIVE')throw new Error('Partner tidak ditemukan atau belum ACTIVE.');}
   let route=null,snapshot=null,destination=null,destinationHub='DJJ',viaHub=null;
   if(type.requiresLastmile){
-    ({route,snapshot}=await activeRoute(input.kodeRute));const point=coord(input,'destination');if(!point)throw new Error('Layanan ke Door wajib titik GPS tujuan penerima.');destinationHub=upper(route.bandaraAsal||route.hub||'DJJ')||'DJJ';viaHub=destinationHub!=='DJJ'?'DJJ':null;
+    ({route,snapshot}=await activeRoute(input.kodeRute));const point=coord(input,'destination');if(!point)throw new Error('Layanan ke Door wajib titik GPS tujuan penerima.');destinationHub=hubCode(route.bandaraAsal||route.hub||'DJJ');viaHub=destinationHub!=='DJJ'?'DJJ':null;
     destination={kodeWilayah:route.kodeWilayah||null,kelurahan:route.kelurahan||null,distrik:route.distrik||null,kabupatenKota:route.kabupatenKota||null,provinsi:route.provinsi||null,...point,confirmedKelurahan:true,coordinateSource:'ADMIN_CUSTOMER_LOCATION'};
   }else{
-    const destinationCode=upper(input.destinationPortCode||'DJJ');if(destinationCode!=='DJJ')throw new Error('Pilot Port dari Soetta saat ini dikunci ke DJJ. Rute lain aktif setelah master airline/service dipublish.');destinationHub='DJJ';destination={kodeWilayah:null,kelurahan:'PORT DJJ / BANDARA SENTANI',distrik:'SENTANI',kabupatenKota:'KABUPATEN JAYAPURA',provinsi:'PAPUA',confirmedKelurahan:false,portDelivery:true};
+    const destinationCode=hubCode(input.destinationPortCode||'DJJ');if(destinationCode!=='DJJ')throw new Error('Pilot Port dari Soetta saat ini dikunci ke DJJ. Rute lain aktif setelah master airline/service dipublish.');destinationHub='DJJ';destination={kodeWilayah:null,kelurahan:'PORT DJJ / BANDARA SENTANI',distrik:'SENTANI',kabupatenKota:'KABUPATEN JAYAPURA',provinsi:'PAPUA',confirmedKelurahan:false,portDelivery:true};
   }
   const pickupPoint=coord(input,'pickup');const pickup=type.requiresPickup?{address:sender.address,...(pickupPoint||{}),gpsRequiredBeforeAssignment:!pickupPoint}:null;
   const idempotencyOwner=partnerId||'JLX_SOETTA_COUNTER',proposedId=newBookingId(),reservation=await reserveIdempotency(idempotencyOwner,requestToken,proposedId);if(!reservation.created){const existing=await getBooking(reservation.bookingId);if(existing)return {booking:existing,duplicate:true};throw new Error('Request booking sedang diproses. Refresh lalu cek antrean.');}
