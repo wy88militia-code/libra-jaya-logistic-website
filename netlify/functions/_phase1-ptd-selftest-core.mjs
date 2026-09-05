@@ -2,7 +2,7 @@ import { allocateOperationalCosts } from './_smu-cost-allocation-core.mjs';
 import { calculatePhase1PtpVendorBatchCost, phase1CustomerChargeableKg, resolveAirlinePtpCostPolicy } from './_phase1-ptd-core.mjs';
 import { DJJ_LASTMILE_ENGINE, isDjjLastmileRoute, resolveDjjLastmileWeightBasis } from './_djj-lastmile-engine.mjs';
 import { allocateFinanceIncomingHandling } from './_finance-smu-handling-core.mjs';
-import { simulatePhase1PtpSelling } from './_phase1-final-pricing-core.mjs';
+import { isPhase1JlxInternalBooking, simulatePhase1PtpSelling } from './_phase1-final-pricing-core.mjs';
 import { calculateRateAmount } from './_rate-plan-core.mjs';
 
 function assert(name,condition,detail){if(!condition){const e=new Error(`${name}: ${detail}`);e.check=name;throw e;}return {name,status:'PASS',detail};}
@@ -12,6 +12,8 @@ export function runPhase1PtdSelfTest(){
   const checks=[];
   checks.push(assert('REGULAR_NO_10KG_MIN',phase1CustomerChargeableKg('PTD_CGK_DJJ_REGULAR',3)===3,'Reguler 3 kg tetap 3 kg customer chargeable.'));
   checks.push(assert('ONS_10KG_MIN',phase1CustomerChargeableKg('PTD_CGK_DJJ_ONS',3)===10,'ONS 3 kg menjadi minimum billing 10 kg.'));
+  checks.push(assert('JLX_INTERNAL_PTD_PRICING_SCOPE',isPhase1JlxInternalBooking({source:'JLX_SOETTA_ADMIN',originHub:'CGK',destinationHub:'DJJ',serviceType:'PTD',requiresLastmile:true,lastmileEngine:{channel:'JLX_INTERNAL'}})===true,'JL Express internal CGK→DJJ PTD boleh memakai engine pricing Tahap 1.'));
+  checks.push(assert('PARTNER_API_BLOCKED_FROM_PTP_PRICING',isPhase1JlxInternalBooking({source:'API',originHub:'DJJ',destinationHub:'DJJ',serviceType:'PTD',requiresLastmile:true,lastmileEngine:{channel:'PARTNER_API'}})===false,'Partner API DJJ last-mile tidak boleh masuk pricing airfreight CGK→DJJ.'));
 
   const garudaPolicy=resolveAirlinePtpCostPolicy({airlineId:'garuda-citilink',airlineName:'Garuda / Citilink',notes:'PTP all-in termasuk RA/gudang keberangkatan. Garuda disamakan dengan Citilink.',adminPerSmu:20000});
   const batch=calculatePhase1PtpVendorBatchCost({batchWeightKg:12,vendorMinKg:10,airlineRatePerKg:70225,policy:garudaPolicy});
@@ -62,5 +64,5 @@ export function runPhase1PtdSelfTest(){
   const ptpOnly=allocateFinanceIncomingHandling([{bookingId:'PTP-ONLY',serviceType:'PTP',requiresLastmile:false,chargeableWeightKg:20}],new Map([['PTP-ONLY',{smuNumbers:['SMU-PTP']}]]));
   checks.push(assert('FINANCE_PTP_EXCLUDED',ptpOnly.smuCount===0&&ptpOnly.total===0,'Booking PTP-only tidak terkena handling incoming last-mile.'));
 
-  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,garuda12KgVendorCost:batch.total,ptpSell10PctPerKg:m10?.ptpSellRatePerKg||0,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
+  return {ok:true,status:'PASS',checkCount:checks.length,checks,example:{regular3Kg:3,ons3Kg:10,partnerApiPtpPricingAllowed:false,garuda12KgVendorCost:batch.total,ptpSell10PctPerKg:m10?.ptpSellRatePerKg||0,uniqueSmuAirlineAdmin:adminTotal,uniqueSmuIncomingHandling:incomingTotal,partnerPtiWeightKg:apiBasis.basisWeightKg,jlxArrivalWeightKg:jlxBasis.basisWeightKg,lastmile5KgRouteOnly:lastmileQuote?.totalAmount||0,financeSharedSmuTotal:financeShared.total},testedAt:new Date().toISOString()};
 }
