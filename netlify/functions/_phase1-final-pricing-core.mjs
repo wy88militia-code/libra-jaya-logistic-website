@@ -13,6 +13,15 @@ function roundUp(value,step=1000){const s=Math.max(1,money(step)||1000);return M
 function serviceCode(booking={}){return upper(booking.serviceLevel)==='ONS'||upper(booking.service).includes('ONS')?'PTD_CGK_DJJ_ONS':'PTD_CGK_DJJ_REGULAR';}
 function declaredValue(booking={}){return money(booking.declaredValue??booking.goodsValue??booking.invoiceValue??booking.itemValue);}
 
+export function simulatePhase1PtpSelling(input={}){
+  const airlineRatePerKg=money(input.airlineRatePerKg),customerChargeableKg=kg(input.customerChargeableKg),lastmileRatePerKg=money(input.lastmileRatePerKg),insuranceAmount=money(input.insuranceAmount),roundTo=money(input.roundTo)||1000;
+  const margins=[...new Set((Array.isArray(input.margins)?input.margins:[5,10,15,20]).map(x=>Math.round(num(x)*100)/100).filter(x=>x>0&&x<=60))].sort((a,b)=>a-b);
+  return margins.map(marginPct=>{
+    const ptpSellRatePerKg=roundUp(airlineRatePerKg*(1+marginPct/100),roundTo),ptpFreight=money(ptpSellRatePerKg*customerChargeableKg),lastmileFreight=money(lastmileRatePerKg*customerChargeableKg),totalPreview=money(ptpFreight+lastmileFreight+insuranceAmount),ptpSpreadPerKg=money(ptpSellRatePerKg-airlineRatePerKg),ptpSpreadAmount=money(ptpSpreadPerKg*customerChargeableKg),effectiveGrossMarginPct=ptpSellRatePerKg>0?Math.round(((ptpSellRatePerKg-airlineRatePerKg)/ptpSellRatePerKg)*10000)/100:0;
+    return {marginPct,ptpSellRatePerKg,ptpSpreadPerKg,ptpSpreadAmount,effectiveGrossMarginPct,ptpFreight,lastmileFreight,insuranceAmount,totalPreview,note:'Simulasi saja. Admin/unique-SMU dan handling incoming tetap cost internal batch, bukan charge penuh per booking.'};
+  });
+}
+
 export async function getPhase1FinalPricingReadiness(bookingId,input={}){
   const booking=await getBooking(bookingId);if(!booking)throw new Error('Booking tidak ditemukan.');
   if(upper(booking.serviceType)!=='PTD'||booking.requiresLastmile===false){const e=new Error('Pricing readiness ini khusus Tahap 1 Port-to-Door CGK→DJJ→last-mile.');e.code='NOT_PHASE1_PTD';throw e;}
@@ -31,12 +40,14 @@ export async function getPhase1FinalPricingReadiness(bookingId,input={}){
 
   const finalWeightKg=kg(approval.weight?.libraFinalChargeableWeightKg??approval.weight?.chargeableWeightKg),customerChargeableKg=finalWeightKg>0?phase1CustomerChargeableKg(serviceCode(booking),finalWeightKg):0,marginPct=num(config.margins.portToPort),ptpSellRatePerKg=config.portToPortSellConfigured?roundUp(airline.ratePerKg*(1+marginPct/100),config.roundTo):null,ptpFreight=ptpSellRatePerKg?money(ptpSellRatePerKg*customerChargeableKg):null,lastmileFreight=lastmileRatePerKg>0&&customerChargeableKg>0?money(lastmileRatePerKg*customerChargeableKg):null,insuranceAmount=value>0?money(value*num(config.insurance.ratePercent)/100):null;
   const airlinePolicy=resolveAirlinePtpCostPolicy({airlineId:airline.airlineId,airlineName:airline.airlineName,notes:airline.airlineNotes,adminPerSmu:airline.adminPerSmu});
+  const simulations=customerChargeableKg>0&&lastmileRatePerKg>0?simulatePhase1PtpSelling({airlineRatePerKg:airline.ratePerKg,customerChargeableKg,lastmileRatePerKg,insuranceAmount,roundTo:config.roundTo,margins:input.simulationMargins}):[];
   const ready=reasons.length===0,total=ready?money(ptpFreight+lastmileFreight+insuranceAmount):null;
   return {
     ready,bookingId:booking.bookingId,serviceCode:serviceCode(booking),serviceLevel:booking.serviceLevel||null,routeCode:booking.kodeRute||null,finalWeightKg,customerChargeableKg,
     selling:{ptpMarginPct:marginPct,ptpSellRatePerKg,lastmileRatePerKg,ptpFreight,lastmileFreight,declaredValue:value||null,insuranceRequired:config.insurance.required,insuranceRatePercent:config.insurance.ratePercent,insuranceAmount,total},
+    simulations,
     costReference:{airlineRateId:airline.rateId,airlineId:airline.airlineId,airlineName:airline.airlineName,airlineRatePerKg:airline.ratePerKg,vendorMinKg:airline.minKg,adminPerUniqueSmu:airline.adminPerSmu,airlinePolicy,note:'Rate airline/admin adalah cost reference. Admin/SMU dan handling incoming Rp25.000 adalah cost unique-SMU internal; tidak otomatis ditambahkan penuh per booking customer.'},
-    config:{pricingMode:config.pricingMode,requireConfiguredMargin:config.requireConfiguredMargin,roundTo:config.roundTo,source:config.source,capturedAt:config.capturedAt},
+    config:{pricingMode:config.pricingMode,requireConfiguredMargin:config.requireConfiguredMargin,roundTo:config.roundTo,source:config.source,capturedAt:config.capturedAt,portToPortSellConfigured:config.portToPortSellConfigured},
     weightApproval:{status:approval.status,continuationAllowed:approval.continuationAllowed,fingerprint:approval.fingerprint||null},reasons,
   };
 }
