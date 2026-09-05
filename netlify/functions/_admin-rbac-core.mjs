@@ -15,6 +15,7 @@ const PATH_ROLES=[
  [/^\/admin-phase1-accurate-si-uat$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-phase1-accurate-si-production-readiness$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-phase1-partner-deposit-bridge$/,['SUPERADMIN','FINANCE']],
+ [/^\/admin-phase1-partner-deposit-dp-uat$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-accurate(?:\/simulation)?$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-quotes$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-master-sheet$/,['SUPERADMIN','OPS']],
