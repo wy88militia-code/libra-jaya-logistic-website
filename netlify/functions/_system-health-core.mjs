@@ -21,7 +21,7 @@ const num=v=>Number.isFinite(Number(v))?Number(v):0;
 const ageMin=v=>{const t=new Date(v||0).getTime();return Number.isFinite(t)&&t>0?Math.round((Date.now()-t)/6000)/10:null;};
 const check=(id,label,status,detail,{link='/admin-tool',ageMinutes=null,blocking=true,meta=null}={})=>({id,label,status,detail,link,ageMinutes,blocking,meta});
 const pilotSet=new Set(PILOT_ROUTE_CODES);
-function fingerprint(checks){return crypto.createHash('sha256').update(checks.filter(x=>['WARN','FAIL'].includes(x.status)).map(x=>`${x.id}:${x.status}`).sort().join('|')).digest('hex').slice(0,16);}
+function fingerprint(checks){return crypto.createHash('sha256').update(checks.filter(x=>x.blocking!==false&&['WARN','FAIL'].includes(x.status)).map(x=>`${x.id}:${x.status}`).sort().join('|')).digest('hex').slice(0,16);}
 function workerCheck(id,label,row,{pass=30,warn=60,link,missing='WARN',blocking=true}={}){
   if(!row)return check(id,label,missing,'Heartbeat belum tersedia. Worker akan dinilai setelah jadwal pertama berjalan.',{link,ageMinutes:null,blocking});
   const age=heartbeatAgeMinutes(row);
@@ -55,7 +55,8 @@ export async function buildSystemHealth(){
   const pilotReady=pilot.length===PILOT_ROUTE_CODES.length&&verified+confirmation>=PILOT_ROUTE_CODES.length&&verified>=PILOT_ROUTE_CODES.length-confirmation;
   checks.push(check('PILOT_ROUTES','41 Rute Pilot',pilotReady?'PASS':'WARN',`${pilot.length}/${PILOT_ROUTE_CODES.length} ada di Master • ${verified} Routes terverifikasi • ${confirmation} konfirmasi operasional • ${autoPriced} punya harga rekomendasi.`,{link:'/admin-maps-pilot',blocking:false,meta:{pilot:pilot.length,verified,confirmation,autoPriced}}));
   const elevationEligible=pilot.filter(r=>!r.requiresOperationalConfirmation&&(r.autoVerified||String(r.statusKoordinat||'').includes('ROUTES PASS')||String(r.statusVerifikasi||'').includes('TERVERIFIKASI'))),elevationPass=elevationEligible.filter(r=>String(r.elevationStatus||r.elevationModelStatus||'').toUpperCase().includes('ELEVATION PASS')).length;
-  checks.push(check('ELEVATION_TERRAIN','Elevation & Terrain',elevationEligible.length>0&&elevationPass===elevationEligible.length?'PASS':'WARN',`${elevationPass}/${elevationEligible.length||0} rute darat terverifikasi memiliki profil elevasi.`,{link:'/admin-maps-pilot',blocking:false,meta:{eligible:elevationEligible.length,pass:elevationPass,pending:Math.max(0,elevationEligible.length-elevationPass)}}));
+  if(!elevationEligible.length)checks.push(check('ELEVATION_TERRAIN','Elevation & Terrain','MANUAL','Belum ada rute darat terverifikasi yang wajib dihitung profil elevasinya. Modul ini opsional dan tidak memblokir operasional.',{link:'/admin-maps-pilot',blocking:false,meta:{eligible:0,pass:0,pending:0}}));
+  else checks.push(check('ELEVATION_TERRAIN','Elevation & Terrain',elevationPass===elevationEligible.length?'PASS':'WARN',`${elevationPass}/${elevationEligible.length} rute darat terverifikasi memiliki profil elevasi.`,{link:'/admin-maps-pilot',blocking:false,meta:{eligible:elevationEligible.length,pass:elevationPass,pending:Math.max(0,elevationEligible.length-elevationPass)}}));
 
   const vendorAge=ageMin(lastVendor?.syncedAt||vendor?.syncedAt||vendor?.publishedAt);
   if(!isVendorMasterConfigured())checks.push(check('VENDOR_MASTER','Vendor Master & Cost','WARN','Credential Vendor Master belum lengkap. Operasional inti tetap dapat berjalan.',{link:'/admin-vendor-master',blocking:false}));
@@ -83,7 +84,7 @@ export async function buildSystemHealth(){
   if(hBackup)checks.push(workerCheck('DAILY_BACKUP','Daily Backup',hBackup,{pass:30*60,warn:48*60,link:'/admin-audit-backup'}));
   else if(latestBackup&&backupAge!==null&&backupAge<=30*60)checks.push(check('DAILY_BACKUP','Daily Backup','PASS',`${latestBackup.backupId} • ${Math.round(backupAge/60*10)/10} jam lalu.`,{link:'/admin-audit-backup',ageMinutes:backupAge}));
   else checks.push(check('DAILY_BACKUP','Daily Backup','WARN','Heartbeat backup belum tersedia atau backup terakhir terlalu lama.',{link:'/admin-audit-backup'}));
-  checks.push(check('OFFSITE_BACKUP','Encrypted Off-site Backup',offsite.configured?'PASS':'WARN',offsite.configured?'Konfigurasi off-site terenkripsi tersedia.':`Belum lengkap: ${(offsite.missing||[]).join(', ')||'konfigurasi belum siap'}.`,{link:'/admin-resilience',blocking:false}));
+  checks.push(check('OFFSITE_BACKUP','Encrypted Off-site Backup',offsite.configured?'PASS':'MANUAL',offsite.configured?'Konfigurasi off-site terenkripsi tersedia.':`Opsional / belum diaktifkan. Belum lengkap: ${(offsite.missing||[]).join(', ')||'konfigurasi belum siap'}. Backup utama tetap dipantau terpisah.`,{link:'/admin-resilience',blocking:false}));
 
   const adminSecret=String(process.env.ADMIN_SESSION_SECRET||'').length>=32,partnerSecret=String(process.env.PARTNER_SESSION_SECRET||'').length>=32,origin=Boolean(String(process.env.URL||process.env.DEPLOY_PRIME_URL||'').trim());
   checks.push(check('API_SECURITY','Partner API & Security',adminSecret&&partnerSecret?'PASS':'FAIL',`Admin session ${adminSecret?'OK':'BELUM'} • Partner/API session ${partnerSecret?'OK':'BELUM'}.`,{link:'/admin-api-security'}));
@@ -97,14 +98,15 @@ export async function buildSystemHealth(){
   else if(accException||accRetry)checks.push(check('ACCURATE','Accurate Online Full Auto','WARN',`Full Auto aktif • POSTED ${accPosted} • Retry ${accRetry} • Exception ${accException}.`,{link:'/admin-accurate/auto',blocking:false,meta:{...accurate,counts:accCounts}}));
   else checks.push(check('ACCURATE','Accurate Online Full Auto','PASS',`Full Auto ON • 2/2 production lock aktif • Duplicate Guard + Read-back ON • POSTED ${accPosted}.`,{link:'/admin-accurate/auto',meta:{...accurate,counts:accCounts}}));
 
-  const blockingFail=checks.filter(x=>x.blocking!==false&&x.status==='FAIL').length,warnings=checks.filter(x=>x.status==='WARN').length,failures=checks.filter(x=>x.status==='FAIL').length,passes=checks.filter(x=>x.status==='PASS').length,manual=checks.filter(x=>x.status==='MANUAL').length;
-  const overall=blockingFail?'CRITICAL':warnings||failures?'DEGRADED':'HEALTHY',issueFingerprint=fingerprint(checks);
-  return {checkedAt,overall,issueFingerprint,summary:{total:checks.length,passes,warnings,failures,manual,blockingFail},checks};
+  const blockingWarnings=checks.filter(x=>x.blocking!==false&&x.status==='WARN').length,blockingFail=checks.filter(x=>x.blocking!==false&&x.status==='FAIL').length,warnings=checks.filter(x=>x.status==='WARN').length,failures=checks.filter(x=>x.status==='FAIL').length,passes=checks.filter(x=>x.status==='PASS').length,manual=checks.filter(x=>x.status==='MANUAL').length;
+  const advisoryWarnings=checks.filter(x=>x.blocking===false&&['WARN','FAIL'].includes(x.status)).length;
+  const overall=blockingFail?'CRITICAL':blockingWarnings?'DEGRADED':'HEALTHY',issueFingerprint=fingerprint(checks);
+  return {checkedAt,overall,issueFingerprint,summary:{total:checks.length,passes,warnings,failures,manual,blockingWarnings,blockingFail,advisoryWarnings},checks};
 }
 
 async function notifyTransition(previous,current){
   const changed=!previous||previous.overall!==current.overall||previous.issueFingerprint!==current.issueFingerprint;if(!changed)return null;
-  const bad=current.checks.filter(x=>['WARN','FAIL'].includes(x.status));
+  const bad=current.checks.filter(x=>x.blocking!==false&&['WARN','FAIL'].includes(x.status));
   if(current.overall==='HEALTHY'&&previous&&previous.overall!=='HEALTHY')return createOperationalNotification({type:'SYSTEM_HEALTH_RECOVERED',severity:'SUCCESS',title:'System Libra kembali normal',message:'Semua koneksi blocking yang dipantau kembali dalam kondisi hijau.',notifyPartner:false,notifyAdmin:true,adminLink:'/admin-system-health',dedupeKey:`system-health:recovered:${current.checkedAt.slice(0,16)}`,metadata:{overall:current.overall,summary:current.summary}});
   if(current.overall==='HEALTHY')return null;
   const severity=current.overall==='CRITICAL'?'CRITICAL':'WARNING',list=bad.slice(0,5).map(x=>`${x.label}: ${x.status}`).join(' • ');
