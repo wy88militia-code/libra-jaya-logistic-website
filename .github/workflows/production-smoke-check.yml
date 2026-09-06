@@ -33,6 +33,10 @@ jobs:
           node --check netlify/functions/_api-auth.mjs
           node --check netlify/functions/_accurate-partner-deposit-dp-uat-core.mjs
           node --check netlify/functions/admin-phase1-partner-deposit-dp-uat.mjs
+          node --check netlify/functions/_accurate-partner-deposit-receipt-uat-core.mjs
+          node --check netlify/functions/admin-phase1-partner-deposit-receipt-uat.mjs
+          node --check netlify/functions/_accurate-partner-deposit-apply-uat-core.mjs
+          node --check netlify/functions/admin-phase1-partner-deposit-apply-uat.mjs
           node --check netlify/functions/_accurate-partner-deposit-bridge-audit-core.mjs
           node --check netlify/functions/admin-phase1-partner-deposit-bridge.mjs
           node --check netlify/functions/_admin-rbac-core.mjs
@@ -84,7 +88,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation /admin-audit-backup /admin-audit-recovery /admin-resilience /admin-phase1-partner-deposit-dp-uat; do
+          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation /admin-audit-backup /admin-audit-recovery /admin-resilience /admin-phase1-partner-deposit-dp-uat /admin-phase1-partner-deposit-receipt-uat /admin-phase1-partner-deposit-apply-uat; do
             code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://librajayalogistic.com${path}")"
             echo "${path} -> HTTP ${code}"
             case "${code}" in
