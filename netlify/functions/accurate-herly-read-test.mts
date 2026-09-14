@@ -48,8 +48,19 @@ async function tryHistory(resource: string, customer: any) {
   return { ok: false, resource, rows: [] as any[] };
 }
 
+function parseAccurateDate(value: unknown) {
+  const s = clean(value, 40);
+  if (!s) return 0;
+  const m = s.match(/^(\d{1,2})\/(\d{1,2})\/(\d{4})$/);
+  if (m) return Date.UTC(Number(m[3]), Number(m[2]) - 1, Number(m[1]));
+  const t = Date.parse(s);
+  return Number.isFinite(t) ? t : 0;
+}
+
 function newestDate(...values: unknown[]) {
-  return values.map(v => clean(v, 40)).filter(Boolean).sort().reverse()[0] || null;
+  const candidates = values.map(v => clean(v, 40)).filter(Boolean);
+  candidates.sort((a, b) => parseAccurateDate(b) - parseAccurateDate(a));
+  return candidates[0] || null;
 }
 
 export default async (req: Request) => {
@@ -77,29 +88,32 @@ export default async (req: Request) => {
       const orderRows = order.rows || [];
       const lastInvoice = invoiceRows[0] || null;
       const lastOrder = orderRows[0] || null;
+      const lastActivity = newestDate(lastInvoice?.transDate, lastOrder?.transDate);
 
       out.push({
         id: c.id,
-        no: c.no || null,
-        name: c.name || null,
+        no: c.no || detail?.no || detail?.customerNo || null,
+        name: c.name || detail?.name || null,
         suspended: Boolean(c.suspended ?? detail?.suspended ?? false),
         phoneMasked: maskPhone(detail?.mobilePhone || c.mobilePhone || detail?.phone),
         emailMasked: detail?.email ? String(detail.email).replace(/(^.).*(@.*$)/, '$1***$2') : null,
         lastSalesInvoice: lastInvoice ? { id: lastInvoice.id, number: lastInvoice.number || null, transDate: lastInvoice.transDate || null, totalAmount: lastInvoice.totalAmount ?? null } : null,
         lastSalesOrder: lastOrder ? { id: lastOrder.id, number: lastOrder.number || null, transDate: lastOrder.transDate || null, totalAmount: lastOrder.totalAmount ?? null } : null,
-        lastActivity: newestDate(lastInvoice?.transDate, lastOrder?.transDate),
+        lastActivity,
+        lastActivityEpoch: parseAccurateDate(lastActivity),
       });
     }
 
-    out.sort((a, b) => String(b.lastActivity || '').localeCompare(String(a.lastActivity || '')));
+    out.sort((a, b) => Number(b.lastActivityEpoch || 0) - Number(a.lastActivityEpoch || 0));
+    const sanitized = out.map(({ lastActivityEpoch, ...row }) => row);
     return Response.json({
       ok: true,
       readOnly: true,
       database: Netlify.env.get('ACCURATE_PRODUCTION_DATABASE_NAME') || null,
       query: 'Herly',
       totalCustomersRead: customers.length,
-      matches: out,
-      recommendedCustomer: out.find(x => !x.suspended) || out[0] || null,
+      matches: sanitized,
+      recommendedCustomer: sanitized.find(x => !x.suspended) || sanitized[0] || null,
       testedAt: new Date().toISOString(),
     }, { headers: { 'cache-control': 'no-store' } });
   } catch (error: any) {
