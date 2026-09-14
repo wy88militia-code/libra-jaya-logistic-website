@@ -46,6 +46,18 @@ jobs:
           p.write_text(s)
           PY
 
+      - name: Prepare ephemeral Herly test key
+        if: contains(github.event.head_commit.message, 'Run Herly read test securely')
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(openssl rand -hex 24)"
+          echo "HERLY_EPHEMERAL_KEY=${key}" >> "${GITHUB_ENV}"
+          npx --yes netlify-cli@latest env:set HERLY_TEST_KEY "${key}" \
+            --context production \
+            --site "${NETLIFY_SITE_ID}" \
+            --auth "${NETLIFY_AUTH_TOKEN}" >/dev/null
+
       - name: Deploy current main to Netlify production
         shell: bash
         run: |
@@ -75,14 +87,13 @@ jobs:
           exit 1
 
       - name: Herly Accurate read-only test
-        if: contains(github.event.head_commit.message, 'Run Herly read test')
+        if: contains(github.event.head_commit.message, 'Run Herly read test securely')
         shell: bash
         run: |
           set -euo pipefail
-          key="$(npx --yes netlify-cli@latest env:get HERLY_TEST_KEY --context production --site "${NETLIFY_SITE_ID}" --auth "${NETLIFY_AUTH_TOKEN}" | tail -n 1 | tr -d '\r\n')"
-          if [ -z "${key}" ]; then
-            echo "HERLY_TEST_KEY unavailable"
+          if [ -z "${HERLY_EPHEMERAL_KEY:-}" ]; then
+            echo "Ephemeral Herly key unavailable"
             exit 1
           fi
-          response="$(curl -fsS --max-time 60 --get --data-urlencode "key=${key}" https://librajayalogistic.com/internal/accurate-herly-read-test-7f4c2a91)"
+          response="$(curl -fsS --max-time 90 --get --data-urlencode "key=${HERLY_EPHEMERAL_KEY}" https://librajayalogistic.com/internal/accurate-herly-read-test-7f4c2a91)"
           printf '%s\n' "${response}" | jq .
