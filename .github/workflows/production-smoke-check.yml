@@ -179,7 +179,7 @@ jobs:
             /jlx-soetta/booking \
             /admin-phase1-ptd-check \
             /admin-lastmile-djj \
-            /courier-lastmile-djj \
+            /courier/lastmile-djj \
             /admin-phase1-invoices \
             /admin-phase1-accurate-si-uat \
             /admin-phase1-accurate-si-production-readiness \
