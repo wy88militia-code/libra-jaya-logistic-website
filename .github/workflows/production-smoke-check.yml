@@ -23,14 +23,52 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Shared Master + compliance
           node --check netlify/functions/_jl-master-core.mjs
           node --check netlify/functions/_karantina-core.mjs
           node --check netlify/functions/public-karantina-screen.mjs
-          node --check netlify/functions/_phase1-final-pricing-core.mjs
-          node --check netlify/functions/_backup-core.mjs
+          node --check netlify/functions/_admin-rbac-core.mjs
           node --check netlify/functions/_admin-audit-core.mjs
-          node --check netlify/functions/admin-audit-recovery.mjs
-          node --check netlify/functions/_api-auth.mjs
+
+          # Phase 1 Soetta: booking -> weight -> pricing -> invoice draft
+          node --check netlify/functions/_soetta-booking-core.mjs
+          node --check netlify/functions/jlx-soetta-booking.mjs
+          node --check netlify/functions/_weight-core.mjs
+          node --check netlify/functions/_weight-approval-core.mjs
+          node --check netlify/functions/_phase1-ptd-core.mjs
+          node --check netlify/functions/_phase1-ptd-selftest-core.mjs
+          node --check netlify/functions/_phase1-final-pricing-core.mjs
+          node --check netlify/functions/_phase1-price-lock-core.mjs
+          node --check netlify/functions/_phase1-invoice-draft-core.mjs
+          node --check netlify/functions/jlx-soetta-pricing.mjs
+          node --check netlify/functions/jlx-soetta-invoice.mjs
+          node --check netlify/functions/admin-phase1-invoices.mjs
+
+          # CGK -> DJJ -> shared DJJ last-mile -> POD
+          node --check netlify/functions/_manifest-core.mjs
+          node --check netlify/functions/_phase1-marketplace-core.mjs
+          node --check netlify/functions/scheduled-phase1-marketplace.mjs
+          node --check netlify/functions/_djj-lastmile-engine.mjs
+          node --check netlify/functions/_djj-lastmile-queue-core.mjs
+          node --check netlify/functions/_warehouse-core.mjs
+          node --check netlify/functions/_tracking-core.mjs
+          node --check netlify/functions/_courier-custody-core.mjs
+          node --check netlify/functions/admin-lastmile-djj.mjs
+          node --check netlify/functions/courier-lastmile-djj.mjs
+
+          # Native Accurate Sales Invoice + anti-double settlement
+          node --check netlify/functions/_accurate-native-si-core.mjs
+          node --check netlify/functions/_accurate-native-si-uat-core.mjs
+          node --check netlify/functions/_accurate-native-si-uat-readback-core.mjs
+          node --check netlify/functions/_accurate-native-si-production-readiness-core.mjs
+          node --check netlify/functions/_accurate-native-si-production-core.mjs
+          node --check netlify/functions/_accurate-sales-invoice-verify-core.mjs
+          node --check netlify/functions/_phase1-native-si-wallet-core.mjs
+          node --check netlify/functions/_phase1-native-si-settlement-core.mjs
+          node --check netlify/functions/admin-phase1-accurate-si-uat.mjs
+          node --check netlify/functions/admin-phase1-accurate-si-production-readiness.mjs
+
+          # Partner Deposit UAT bridge remains syntax-gated; production stays guarded.
           node --check netlify/functions/_accurate-partner-deposit-dp-uat-core.mjs
           node --check netlify/functions/admin-phase1-partner-deposit-dp-uat.mjs
           node --check netlify/functions/_accurate-partner-deposit-receipt-uat-core.mjs
@@ -39,7 +77,55 @@ jobs:
           node --check netlify/functions/admin-phase1-partner-deposit-apply-uat.mjs
           node --check netlify/functions/_accurate-partner-deposit-bridge-audit-core.mjs
           node --check netlify/functions/admin-phase1-partner-deposit-bridge.mjs
-          node --check netlify/functions/_admin-rbac-core.mjs
+
+          # Resilience
+          node --check netlify/functions/_backup-core.mjs
+          node --check netlify/functions/admin-audit-recovery.mjs
+          node --check netlify/functions/_api-auth.mjs
+
+      - name: Unit test Phase 1 logistics guards
+        shell: bash
+        run: |
+          set -euo pipefail
+          node --input-type=module <<'NODE'
+          import {
+            phase1CustomerChargeableKg,
+            calculatePhase1PtpVendorBatchCost,
+            resolveAirlinePtpCostPolicy,
+            phase1LastmileHandlingPerUniqueSmu,
+          } from './netlify/functions/_phase1-ptd-core.mjs';
+          import {
+            DJJ_LASTMILE_ENGINE,
+            resolveDjjLastmileWeightBasis,
+            isDjjLastmileRoute,
+          } from './netlify/functions/_djj-lastmile-engine.mjs';
+
+          if (phase1CustomerChargeableKg('PTD_CGK_DJJ_REGULAR', 3) !== 3) throw new Error('REGULAR 3kg must remain 3kg');
+          if (phase1CustomerChargeableKg('PTD_CGK_DJJ_ONS', 3) !== 10) throw new Error('ONS 3kg must bill 10kg');
+          if (phase1CustomerChargeableKg('PTD_CGK_DJJ_ONS', 12) !== 12) throw new Error('ONS 12kg must remain 12kg');
+
+          const policy=resolveAirlinePtpCostPolicy({
+            airlineId:'garuda-citilink',
+            airlineName:'Garuda/Citilink',
+            notes:'PTP ALL-IN termasuk RA + Gudang Keberangkatan',
+            adminPerSmu:20000,
+          });
+          const vendor=calculatePhase1PtpVendorBatchCost({batchWeightKg:12,vendorMinKg:10,airlineRatePerKg:70225,policy});
+          if (vendor.total !== 862700) throw new Error(`Garuda 12kg expected 862700, got ${vendor.total}`);
+          if (vendor.components.find(x=>x.code==='CGK_RA')?.amount !== 0) throw new Error('Garuda all-in RA duplicated');
+          if (vendor.components.find(x=>x.code==='CGK_WAREHOUSE_HANDLING')?.amount !== 0) throw new Error('Garuda all-in warehouse duplicated');
+          if (phase1LastmileHandlingPerUniqueSmu() !== 25000) throw new Error('Unique-SMU incoming handling must be 25000');
+
+          if (DJJ_LASTMILE_ENGINE.id !== 'DJJ_LASTMILE_V1') throw new Error('DJJ last-mile engine ID changed');
+          if (!isDjjLastmileRoute({hub:'DJJ',moda:'DARAT'})) throw new Error('DJJ road route must be eligible');
+          if (isDjjLastmileRoute({hub:'WMX',moda:'DARAT'})) throw new Error('WMX must not enter DJJ last-mile engine');
+          const partnerBasis=resolveDjjLastmileWeightBasis({smuTotalWeightKg:8.5,weightKg:9.2},'PARTNER_API');
+          if (partnerBasis.weightBasis !== 'PARTNER_PTI' || partnerBasis.basisWeightKg !== 8.5 || partnerBasis.sentaniPhysicalCheckMayRepriceCustomer !== false) throw new Error('Partner API PTI weight policy changed');
+          const jlxBasis=resolveDjjLastmileWeightBasis({chargeableWeightKg:12,weightKg:11.4},'JLX_INTERNAL');
+          if (jlxBasis.basisWeightKg !== 12 || jlxBasis.sentaniPhysicalCheckMayRepriceCustomer !== false) throw new Error('JLX upstream final-weight policy changed');
+
+          console.log('Phase 1 logistics guards PASS');
+          NODE
 
       - name: Unit test Karantina screening guard
         shell: bash
@@ -84,11 +170,26 @@ jobs:
           echo "Production did not reach expected commit within 8 minutes."
           exit 1
 
-      - name: Smoke test protected admin panels
+      - name: Smoke test protected Phase 1 panels
         shell: bash
         run: |
           set -euo pipefail
-          for path in /admin-tool /admin-system-health /admin-maps-pilot /admin-master-sheet /admin-finance-billing /admin-consolidation /admin-audit-backup /admin-audit-recovery /admin-resilience /admin-phase1-partner-deposit-dp-uat /admin-phase1-partner-deposit-receipt-uat /admin-phase1-partner-deposit-apply-uat; do
+          for path in \
+            /jlx-soetta \
+            /jlx-soetta/booking \
+            /admin-phase1-ptd-check \
+            /admin-lastmile-djj \
+            /courier-lastmile-djj \
+            /admin-phase1-invoices \
+            /admin-phase1-accurate-si-uat \
+            /admin-phase1-accurate-si-production-readiness \
+            /admin-phase1-partner-deposit-dp-uat \
+            /admin-phase1-partner-deposit-receipt-uat \
+            /admin-phase1-partner-deposit-apply-uat \
+            /admin-tool \
+            /admin-system-health \
+            /admin-master-sheet \
+            /admin-finance-billing; do
             code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 15 "https://librajayalogistic.com${path}")"
             echo "${path} -> HTTP ${code}"
             case "${code}" in
