@@ -35,6 +35,17 @@ jobs:
         shell: bash
         run: npm install --no-audit --no-fund
 
+      - name: Apply temporary syntax hotfix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('netlify/functions/admin-phase1-accurate-si-uat.mjs')
+          s = p.read_text()
+          s = s.replace('`ACCURATE_NATIVE_SI_UAT_*`', 'ACCURATE_NATIVE_SI_UAT_*')
+          p.write_text(s)
+          PY
+
       - name: Deploy current main to Netlify production
         shell: bash
         run: |
