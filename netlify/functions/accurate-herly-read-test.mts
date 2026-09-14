@@ -43,9 +43,7 @@ async function tryHistory(resource: string, customer: any) {
       const { data } = await accurateGet(resource, 'list', params);
       const rows = firstArray(data);
       if (rows.length) return { ok: true, resource, rows };
-    } catch (error: any) {
-      // try the next supported filter form
-    }
+    } catch {}
   }
   return { ok: false, resource, rows: [] as any[] };
 }
@@ -58,8 +56,8 @@ export default async (req: Request) => {
   if (req.method !== 'GET') return new Response('Method Not Allowed', { status: 405 });
   const url = new URL(req.url);
   const key = url.searchParams.get('key') || '';
-  const expected = Netlify.env.get('ADMIN_SESSION_SECRET') || '';
-  if (!expected || key !== expected.slice(-12)) return new Response('Not Found', { status: 404 });
+  const expected = Netlify.env.get('HERLY_TEST_KEY') || '';
+  if (!expected || key !== expected) return new Response('Not Found', { status: 404 });
 
   try {
     const customers = await listAllCustomers();
