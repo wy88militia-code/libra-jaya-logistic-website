@@ -73,3 +73,16 @@ jobs:
           done
           echo "Production commit did not match ${EXPECTED_SHA}."
           exit 1
+
+      - name: Herly Accurate read-only test
+        if: contains(github.event.head_commit.message, 'Run Herly read test')
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(npx --yes netlify-cli@latest env:get HERLY_TEST_KEY --context production --site "${NETLIFY_SITE_ID}" --auth "${NETLIFY_AUTH_TOKEN}" | tail -n 1 | tr -d '\r\n')"
+          if [ -z "${key}" ]; then
+            echo "HERLY_TEST_KEY unavailable"
+            exit 1
+          fi
+          response="$(curl -fsS --max-time 60 --get --data-urlencode "key=${key}" https://librajayalogistic.com/internal/accurate-herly-read-test-7f4c2a91)"
+          printf '%s\n' "${response}" | jq .
