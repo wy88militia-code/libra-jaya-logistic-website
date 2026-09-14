@@ -1,0 +1,60 @@
+name: Netlify Production Deploy
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: netlify-production-main
+  cancel-in-progress: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NETLIFY_SITE_ID: 7bf7a503-fb4a-4222-b028-6fcf32096ed0
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    steps:
+      - name: Checkout source
+        uses: actions/checkout@v4
+
+      - name: Require Netlify auth token
+        shell: bash
+        run: |
+          if [ -z "${NETLIFY_AUTH_TOKEN}" ]; then
+            echo "Missing GitHub Actions secret NETLIFY_AUTH_TOKEN"
+            exit 1
+          fi
+
+      - name: Deploy current main to Netlify production
+        shell: bash
+        run: |
+          npx --yes netlify-cli@latest deploy \
+            --build \
+            --prod \
+            --site "${NETLIFY_SITE_ID}" \
+            --auth "${NETLIFY_AUTH_TOKEN}"
+
+      - name: Verify production commit
+        shell: bash
+        env:
+          EXPECTED_SHA: ${{ github.sha }}
+        run: |
+          set -euo pipefail
+          for attempt in $(seq 1 30); do
+            body="$(curl -fsS --max-time 15 https://librajayalogistic.com/health/release || true)"
+            deployed_sha="$(printf '%s' "${body}" | jq -r '.commitRef // empty' 2>/dev/null || true)"
+            echo "Attempt ${attempt}/30 • deployed=${deployed_sha:-unavailable}"
+            if [ "${deployed_sha}" = "${EXPECTED_SHA}" ]; then
+              echo "Production deploy verified."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "Production commit did not match ${EXPECTED_SHA}."
+          exit 1
