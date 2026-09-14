@@ -1,0 +1,61 @@
+name: Herly Accurate One-Off Test
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    if: contains(github.event.head_commit.message, 'Herly oneoff test')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    env:
+      NETLIFY_SITE_ID: 7bf7a503-fb4a-4222-b028-6fcf32096ed0
+      NETLIFY_AUTH_TOKEN: ${{ secrets.NETLIFY_AUTH_TOKEN }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install dependencies
+        run: npm install --no-audit --no-fund
+
+      - name: Apply legacy syntax hotfix
+        shell: bash
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          p = Path('netlify/functions/admin-phase1-accurate-si-uat.mjs')
+          s = p.read_text()
+          s = s.replace('`ACCURATE_NATIVE_SI_UAT_*`', 'ACCURATE_NATIVE_SI_UAT_*')
+          p.write_text(s)
+          PY
+
+      - name: Generate ephemeral test key
+        shell: bash
+        run: |
+          set -euo pipefail
+          key="$(openssl rand -hex 24)"
+          echo "HERLY_EPHEMERAL_KEY=${key}" >> "${GITHUB_ENV}"
+          npx --yes netlify-cli@latest env:set HERLY_TEST_KEY "${key}" \
+            --context production \
+            --site "${NETLIFY_SITE_ID}" \
+            --auth "${NETLIFY_AUTH_TOKEN}" >/dev/null
+
+      - name: Deploy test-capable production build
+        shell: bash
+        run: |
+          npx --yes netlify-cli@latest deploy \
+            --build \
+            --prod \
+            --site "${NETLIFY_SITE_ID}" \
+            --auth "${NETLIFY_AUTH_TOKEN}"
+
+      - name: Execute Herly read-only query
+        shell: bash
+        run: |
+          set -euo pipefail
+          response="$(curl -fsS --max-time 90 --get --data-urlencode "key=${HERLY_EPHEMERAL_KEY}" https://librajayalogistic.com/internal/accurate-herly-read-test-7f4c2a91)"
+          printf '%s\n' "${response}" | jq .
