@@ -2,6 +2,8 @@
   command = "node scripts/stamp-release.mjs"
   publish = "."
 
+# Deploy trigger: 2026-09-15 AI Accurate Tahap 1
+
 [[redirects]]
   from = "/partner/manual-booking"
   to = "/partner/login.html?next=/partner/booking.html"
