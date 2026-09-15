@@ -21,6 +21,7 @@ const cards=[
  ['Approval Center','Approval tindakan sensitif, Owner Override terkontrol dan audit trail.','/admin-approvals','Buka Approval'],
  ['Finance & Billing','Statement, debit/credit note, klaim, aging dan rekonsiliasi ke Accurate.','/admin-finance-billing','Buka Finance'],
  ['🧠 AI Accurate — Tahap 1','Review transaksi, rekonsiliasi bank, klasifikasi akun dan laporan bulanan secara read-only.','/admin-ai-accurate','Buka AI Accurate'],
+ ['🧾 Libra Tools HC — Tagihan','Akses resmi tagihan per nama, PDF, dan pengiriman Sales Order ke Accurate. Pembayaran dan piutang tetap dikelola di Accurate.','/admin-libra-hc','Buka Libra Tools HC'],
  ['Accurate Online Bridge','Full Auto production + duplicate guard + read-back verification. Akuntan review langsung di Accurate.','/admin-accurate','Buka Accurate'],
  ['📡 Monitor Manifest → Accurate','Pantau setiap manifest: sukses masuk Accurate, masih menunggu, gagal/review, atau belum dikirim.','/admin-manifest-accurate-monitor','Buka Monitor Manifest'],
  ['Link Partner','Manual Booking, aktivasi partner dan onboarding API.','/admin-partner-links','Buka Link Partner'],
@@ -53,7 +54,7 @@ const cards=[
 const panelChecks={
  '/admin-ai-control-tower':['API_SECURITY','NETLIFY_RUNTIME'],
  '/admin-go-live':['MASTER_SHEET','GOOGLE_MAPS','PILOT_ROUTES','XENDIT','ALERT_CHANNELS','DAILY_BACKUP','API_SECURITY','NETLIFY_RUNTIME'],
- '/admin-partners':['XENDIT','API_SECURITY'], '/admin-approvals':['API_SECURITY','NETLIFY_RUNTIME'], '/admin-finance-billing':['MASTER_SHEET','NETLIFY_RUNTIME'], '/admin-ai-accurate':['MASTER_SHEET','NETLIFY_RUNTIME'], '/admin-manifest-accurate-monitor':['NETLIFY_RUNTIME'],
+ '/admin-partners':['XENDIT','API_SECURITY'], '/admin-approvals':['API_SECURITY','NETLIFY_RUNTIME'], '/admin-finance-billing':['MASTER_SHEET','NETLIFY_RUNTIME'], '/admin-ai-accurate':['MASTER_SHEET','NETLIFY_RUNTIME'], '/admin-libra-hc':['NETLIFY_RUNTIME'], '/admin-manifest-accurate-monitor':['NETLIFY_RUNTIME'],
  '/admin-partner-links':['API_SECURITY','NETLIFY_RUNTIME'], '/admin-rate-plans':['MASTER_SHEET','PILOT_ROUTES'], '/admin-master-sheet':['MASTER_SHEET','PILOT_ROUTES','ELEVATION_TERRAIN'],
  '/admin-maps-pilot':['GOOGLE_MAPS','PILOT_ROUTES','ELEVATION_TERRAIN'], '/admin-consolidation':['MINIMUM_LOAD','MASTER_SHEET'], '/admin-vendor-master':['VENDOR_MASTER'],
  '/admin-profitability':['VENDOR_MASTER','MASTER_SHEET'], '/admin-courier-assignment':['NETLIFY_RUNTIME','API_SECURITY'], '/admin-manifests':['NETLIFY_RUNTIME','MASTER_SHEET'],
