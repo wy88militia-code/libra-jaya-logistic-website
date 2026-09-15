@@ -7,7 +7,7 @@ const clean=(value,max=500)=>String(value??'').trim().slice(0,max);
 const now=()=>new Date().toISOString();
 const sha=value=>crypto.createHash('sha256').update(value).digest('hex');
 const money=value=>Math.round((Number(value)||0)*100)/100;
-const PUBLIC_FIELDS=['statementId','createdAt','createdBy','createdByRole','status','confirmedAt','confirmedBy','checksum','files','model','responseId','analysis','validation','error'];
+const PUBLIC_FIELDS=['statementId','createdAt','createdBy','createdByRole','status','confirmedAt','confirmedBy','checksum','files','model','responseId','analysis','validation','reconciliation','reconciliationStatus','error'];
 
 function publicRecord(record){
   const out={};
@@ -98,7 +98,7 @@ async function analyze(files){
     'Ekstrak seluruh transaksi: tanggal ISO YYYY-MM-DD, deskripsi lengkap, referensi, debit, kredit, dan saldo setelah transaksi bila tersedia.',
     'Gunakan angka positif untuk debit dan kredit. Jika kolom mutasi hanya satu dengan tanda, petakan minus ke debit dan plus ke kredit.',
     'Untuk informasi kabur set confidence rendah, needs_review=true, dan jelaskan issue.',
-    'Nomor rekening hanya boleh dikembalikan 4 digit terakhir. Jangan keluarkan nomor lengkap, nama pribadi, alamat, token, atau credential.',
+    'Nomor rekening hanya boleh dikembalikan 4 digit terakhir. Nama pengirim/lawan transaksi yang tercetak harus dipertahankan untuk rekonsiliasi internal; nama tidak selalu tersedia dan ketiadaannya sendiri bukan alasan confidence rendah. Jangan keluarkan nomor rekening lengkap, alamat, token, atau credential.',
     'Tentukan saldo awal/akhir dan urutan transaksi ASC atau DESC. Jika tidak ada, gunakan null.'
   ].join('\n')});
   const response=await fetch('https://api.openai.com/v1/responses',{method:'POST',headers:{authorization:'Bearer '+apiKey,'content-type':'application/json'},body:JSON.stringify({

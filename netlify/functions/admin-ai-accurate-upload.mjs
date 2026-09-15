@@ -1,4 +1,5 @@
 import { createBankStatementDraft, confirmBankStatement } from './_bank-statement-core.mjs';
+import { reconcileLionParcelStatement } from './_lion-parcel-reconcile-core.mjs';
 import { writeAdminAudit } from './_admin-audit-core.mjs';
 import { canRoleAccessPath } from './_admin-rbac-core.mjs';
 import { getAdminSession } from './_partner-core.mjs';
@@ -17,10 +18,17 @@ export default async request=>{
     const type=String(request.headers.get('content-type')||'');
     if(type.includes('application/json')){
       const body=await request.json(),action=clean(body?.action,40);
-      if(action!=='confirm')return json({ok:false,message:'Aksi tidak dikenal.'},400);
-      const result=await confirmBankStatement({statementId:body.statementId,session,note:body.note});
-      await writeAdminAudit({session,request,action:'BANK_STATEMENT_CONFIRM',entityType:'BANK_STATEMENT',entityId:result.record.statementId,after:{status:result.record.status,transactionCount:result.record.validation?.transactionCount},metadata:{alreadyConfirmed:result.alreadyConfirmed}});
-      return json({ok:true,...result});
+      if(action==='confirm'){
+        const result=await confirmBankStatement({statementId:body.statementId,session,note:body.note});
+        await writeAdminAudit({session,request,action:'BANK_STATEMENT_CONFIRM',entityType:'BANK_STATEMENT',entityId:result.record.statementId,after:{status:result.record.status,transactionCount:result.record.validation?.transactionCount},metadata:{alreadyConfirmed:result.alreadyConfirmed}});
+        return json({ok:true,...result});
+      }
+      if(action==='reconcile_lion_parcel'){
+        const record=await reconcileLionParcelStatement({statementId:body.statementId,session});
+        await writeAdminAudit({session,request,action:'LION_PARCEL_SALES_RECEIPT_RECONCILE',entityType:'BANK_STATEMENT',entityId:record.statementId,after:{scope:record.reconciliation?.scope,method:record.reconciliation?.method,summary:record.reconciliation?.summary},metadata:{readOnly:true,nameRequired:false,dateToleranceDays:2}});
+        return json({ok:true,record});
+      }
+      return json({ok:false,message:'Aksi tidak dikenal.'},400);
     }
     const form=await request.formData(),uploads=form.getAll('files').filter(item=>item&&typeof item.arrayBuffer==='function');
     if(!uploads.length)return json({ok:false,message:'Pilih satu PDF atau satu atau beberapa foto.'},400);

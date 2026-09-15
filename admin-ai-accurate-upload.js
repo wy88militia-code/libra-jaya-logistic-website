@@ -20,6 +20,11 @@ async function imageToJpeg(file){
     return file;
   }finally{URL.revokeObjectURL(url);}
 }
+function reconciliationHtml(record){
+  const r=record.reconciliation;if(!r)return '';
+  const s=r.summary||{},rows=(r.rows||[]).map(row=>'<tr class="'+(row.needsReview?'warnrow':'')+'"><td>'+esc(row.date||'—')+'</td><td>'+rp(row.amount)+'</td><td><b>'+esc(row.status)+'</b><small>'+esc(row.reason||'')+'</small></td><td>'+esc((row.invoiceCandidates||[]).map(x=>(x.number||x.id)+' • '+rp(x.amount)+' • '+(x.date||'—')).join(' | ')||'—')+'</td><td>'+Math.round((row.confidence||0)*100)+'%</td></tr>').join('');
+  return '<section class="reconcilebox"><h3>Rekonsiliasi Penerimaan Penjualan Lion Parcel</h3><p>Nama pengirim tidak wajib. Acuan utama: nominal tepat, tanggal ±2 hari, faktur belum dipakai, lalu review akuntan.</p><div class="summary"><div><small>Kredit Bank</small><b>'+esc(s.creditTransactionCount||0)+'</b></div><div><small>Total Kredit</small><b>'+rp(s.totalCredit)+'</b></div><div><small>Perlu Review</small><b>'+esc(s.needsReview||0)+'</b></div><div><small>Unmatched</small><b>'+esc(s.unmatched||0)+'</b></div></div><div class="scrollhint">Geser tabel ke kiri/kanan untuk melihat semua kolom.</div><div class="tablewrap"><table class="match-table"><thead><tr><th>Tanggal</th><th>Kredit Bank</th><th>Status/Alasan</th><th>Kandidat Faktur Accurate</th><th>Skor</th></tr></thead><tbody>'+rows+'</tbody></table></div><small>Hasil ini hanya rekomendasi rule-based. Tidak ada jurnal atau Penerimaan Penjualan yang diposting ke Accurate.</small></section>';
+}
 function render(record,duplicate=false){
   const a=record.analysis||{},v=record.validation||{},rows=(a.transactions||[]).slice(0,300).map(row=>'<tr class="'+(row.needsReview||row.confidence<0.8?'warnrow':'')+'"><td>'+esc(row.date||'—')+'</td><td>'+esc(row.description||'—')+(row.issue?'<small>'+esc(row.issue)+'</small>':'')+'</td><td>'+rp(row.debit)+'</td><td>'+rp(row.credit)+'</td><td>'+(row.balance===null?'—':rp(row.balance))+'</td><td>'+Math.round((row.confidence||0)*100)+'%</td></tr>').join('');
   resultBox.hidden=false;resultBox.innerHTML='<div class="resulthead"><div><b>'+esc(record.statementId)+'</b><span>'+esc(a.bankName||'Bank belum terdeteksi')+' • Rek ****'+esc(a.accountLast4||'—')+'</span></div><span class="state">'+esc(record.status)+'</span></div>'+
@@ -27,15 +32,24 @@ function render(record,duplicate=false){
     (record.error?'<div class="uploadstatus bad">'+esc(record.error)+'</div>':'')+
     '<div class="summary"><div><small>Transaksi</small><b>'+esc(v.transactionCount||0)+'</b></div><div><small>Total Debit</small><b>'+rp(v.totalDebit)+'</b></div><div><small>Total Kredit</small><b>'+rp(v.totalCredit)+'</b></div><div><small>Cek Saldo</small><b>'+esc(v.balanceCheck||'—')+'</b></div><div><small>Perlu Review</small><b>'+esc(v.lowConfidenceCount||0)+'</b></div></div>'+
     ((v.issues||[]).length?'<ul class="issues">'+v.issues.map(x=>'<li>'+esc(x)+'</li>').join('')+'</ul>':'')+
-    (rows?'<div class="tablewrap"><table><thead><tr><th>Tanggal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th><th>Keyakinan</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'')+
-    (record.status==='REVIEW_REQUIRED'?'<div class="review"><input id="reviewNote" maxlength="1000" placeholder="Catatan akuntan (opsional)"><button type="button" id="confirmStatement">Konfirmasi hasil pemeriksaan</button><small>Konfirmasi ini hanya mengunci hasil review. Tidak membuat jurnal dan tidak mengirim transaksi ke Accurate.</small></div>':'');
+    (rows?'<div class="scrollhint">Geser tabel ke kiri/kanan untuk melihat semua kolom.</div><div class="tablewrap"><table class="statement-table"><thead><tr><th>Tanggal</th><th>Keterangan</th><th>Debit</th><th>Kredit</th><th>Saldo</th><th>Keyakinan</th></tr></thead><tbody>'+rows+'</tbody></table></div>':'')+
+    reconciliationHtml(record)+
+    (record.status==='REVIEW_REQUIRED'?'<div class="review"><input id="reviewNote" maxlength="1000" placeholder="Catatan akuntan (opsional)"><button type="button" id="confirmStatement">Konfirmasi hasil pembacaan</button><small>Konfirmasi hanya mengunci hasil baca rekening koran. Tidak membuat jurnal.</small></div>':'')+
+    (record.status==='CONFIRMED'&&!record.reconciliation?'<div class="review"><button type="button" id="reconcileStatement">Cocokkan dengan Penjualan Lion Parcel</button><small>Rule engine membaca Faktur/Penerimaan Penjualan Accurate secara read-only.</small></div>':'');
   document.querySelector('#confirmStatement')?.addEventListener('click',()=>confirmRecord(record.statementId));
+  document.querySelector('#reconcileStatement')?.addEventListener('click',()=>reconcileRecord(record.statementId));
   resultBox.scrollIntoView({behavior:'smooth',block:'start'});
 }
+async function postAction(body){const response=await fetch('/admin-ai-accurate-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify(body)});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.message||'Proses gagal.');return data;}
 async function confirmRecord(statementId){
   const button=document.querySelector('#confirmStatement');button.disabled=true;button.textContent='Menyimpan...';
-  try{const response=await fetch('/admin-ai-accurate-upload',{method:'POST',headers:{'content-type':'application/json'},body:JSON.stringify({action:'confirm',statementId,note:document.querySelector('#reviewNote')?.value||''})});const data=await response.json();if(!response.ok||!data.ok)throw new Error(data.message||'Konfirmasi gagal.');render(data.record);setStatus('Hasil sudah dikonfirmasi akuntan. Tidak ada posting ke Accurate.','good');}
-  catch(error){setStatus(error.message,'bad');button.disabled=false;button.textContent='Konfirmasi hasil pemeriksaan';}
+  try{const data=await postAction({action:'confirm',statementId,note:document.querySelector('#reviewNote')?.value||''});render(data.record);setStatus('Hasil baca dikonfirmasi. Lanjutkan pencocokan Lion Parcel.','good');}
+  catch(error){setStatus(error.message,'bad');button.disabled=false;button.textContent='Konfirmasi hasil pembacaan';}
+}
+async function reconcileRecord(statementId){
+  const button=document.querySelector('#reconcileStatement');button.disabled=true;button.textContent='Membaca Accurate...';setStatus('Mencocokkan kredit bank dengan Faktur/Penerimaan Penjualan berdasarkan tanggal dan nominal.','info');
+  try{const data=await postAction({action:'reconcile_lion_parcel',statementId});render(data.record);setStatus('Rekonsiliasi selesai. Periksa kandidat dan transaksi yang belum cocok.','good');}
+  catch(error){setStatus(error.message,'bad');button.disabled=false;button.textContent='Cocokkan dengan Penjualan Lion Parcel';}
 }
 form.addEventListener('submit',async event=>{
   event.preventDefault();const selected=[...form.elements.files.files];if(!selected.length)return setStatus('Pilih PDF atau foto rekening koran.','bad');
