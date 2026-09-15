@@ -3,99 +3,31 @@ import { accurateGet } from './_accurate-core.mjs';
 
 const STORE_NAME='libra-bank-statements';
 const store=()=>getStore(STORE_NAME);
-const clean=(value,max=500)=>String(value??'').trim().slice(0,max);
-const money=value=>Math.round((Number(value)||0)*100)/100;
+const clean=(v,n=500)=>String(v??'').trim().slice(0,n);
+const money=v=>Math.round((Number(v)||0)*100)/100;
 const now=()=>new Date().toISOString();
-
-function isoDate(value){
-  const raw=clean(value,30);
-  let match=/^(20\d{2})-(\d{2})-(\d{2})/.exec(raw);
-  if(match)return match[1]+'-'+match[2]+'-'+match[3];
-  match=/^(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2})/.exec(raw);
-  if(match)return match[3]+'-'+String(Number(match[2])).padStart(2,'0')+'-'+String(Number(match[1])).padStart(2,'0');
-  const parsed=new Date(raw);return Number.isFinite(parsed.getTime())?parsed.toISOString().slice(0,10):null;
-}
-function dayNumber(value){const date=isoDate(value);return date?Math.floor(new Date(date+'T00:00:00Z').getTime()/86400000):null;}
-function dayDistance(left,right){const a=dayNumber(left),b=dayNumber(right);return a===null||b===null?999:Math.abs(a-b);}
-function rowAmount(row){return money(row?.totalAmount??row?.amount??row?.paymentAmount??row?.grandTotal??0);}
-function invoiceView(row){
-  return {id:clean(row?.id,100),number:clean(row?.number||row?.invoiceNo,120)||null,date:isoDate(row?.transDate||row?.date),amount:rowAmount(row),customerName:clean(row?.customerName||row?.customer?.name||row?.customer,180)||null,owing:row?.owing===undefined&&row?.owingAmount===undefined?null:money(row?.owing??row?.owingAmount)};
-}
-function receiptView(row){
-  return {id:clean(row?.id,100),number:clean(row?.number||row?.receiptNo,120)||null,date:isoDate(row?.transDate||row?.date),amount:rowAmount(row),customerName:clean(row?.customerName||row?.customer?.name||row?.customer,180)||null};
-}
-async function fetchAll(resource,fieldOptions){
-  let lastError=null;
-  for(const fields of fieldOptions){
-    try{
-      const rows=[];let page=1,pageCount=1;
-      do{
-        const {data}=await accurateGet(resource,'list',{'sp.pageSize':100,'sp.page':page,'sp.sort':'transDate|desc',fields});
-        rows.push(...(Array.isArray(data?.d)?data.d:[]));
-        pageCount=Math.max(1,Math.min(Number(data?.sp?.pageCount)||1,20));page+=1;
-      }while(page<=pageCount);
-      return {ok:true,rows,error:null,fields,pages:pageCount};
-    }catch(error){lastError=clean(error?.message||error,500);}
-  }
-  return {ok:false,rows:[],error:lastError||('Gagal membaca '+resource),fields:null,pages:0};
-}
-function publicCandidate(row){return {id:row.id||null,number:row.number||null,date:row.date||null,amount:row.amount,customerName:row.customerName||null,owing:row.owing??null};}
-function combinations(rows,target){
-  const hits=[],limited=rows.filter(x=>x.amount>0&&x.amount<target).slice(0,30);
-  for(let i=0;i<limited.length;i++)for(let j=i+1;j<limited.length;j++){
-    if(Math.abs(limited[i].amount+limited[j].amount-target)<=1)hits.push([limited[i],limited[j]]);
-    if(hits.length>3)return hits;
-    for(let k=j+1;k<limited.length;k++){if(Math.abs(limited[i].amount+limited[j].amount+limited[k].amount-target)<=1)hits.push([limited[i],limited[j],limited[k]]);if(hits.length>3)return hits;}
-  }
-  return hits;
-}
-function matchCredit(tx,invoices,receipts,usedInvoices,receiptSourceOk){
-  const exactAll=invoices.filter(inv=>Math.abs(inv.amount-tx.credit)<=1&&dayDistance(inv.date,tx.date)<=2);
-  const exact=exactAll.filter(inv=>!usedInvoices.has(inv.id));
-  const receiptMatches=receipts.filter(row=>Math.abs(row.amount-tx.credit)<=1&&dayDistance(row.date,tx.date)<=2);
-  const base={bankRow:tx.row,date:tx.date,amount:tx.credit,description:tx.description,reference:tx.reference||null,payerNameAvailable:Boolean(clean(tx.payerName||tx.counterparty))&&!/\[REDACTED_PERSON\]/i.test(clean(tx.payerName||tx.counterparty)),receiptCandidates:receiptMatches.slice(0,5).map(publicCandidate)};
-  if(exact.length===1){
-    const invoice=exact[0];usedInvoices.add(invoice.id);
-    const days=dayDistance(invoice.date,tx.date),receiptExists=receiptMatches.length===1;
-    const status=receiptExists?'MATCHED_RECEIPT_CANDIDATE':receiptSourceOk?'INVOICE_FOUND_PAYMENT_MISSING':'INVOICE_MATCH_RECEIPT_UNVERIFIED';
-    const invoiceReason=days===0?'Nominal dan tanggal tepat; hanya satu faktur kandidat.':'Nominal tepat; tanggal berjarak '+days+' hari; hanya satu faktur kandidat.';
-    const receiptReason=receiptExists?' Kandidat Penerimaan Penjualan juga ditemukan.':receiptSourceOk?' Penerimaan Penjualan belum ditemukan dan wajib diperiksa akuntan.':' Data Penerimaan Penjualan tidak tersedia, sehingga status pembayaran belum dapat dipastikan.';
-    return {...base,status,confidence:days===0?0.92:days===1?0.84:0.76,needsReview:days>0||!receiptExists,reason:invoiceReason+receiptReason,invoiceCandidates:[publicCandidate(invoice)]};
-  }
-  if(exact.length>1)return {...base,status:'AMBIGUOUS_REVIEW',confidence:0.45,needsReview:true,reason:'Nominal dan tanggal cocok dengan beberapa faktur. Agent tidak memilih otomatis.',invoiceCandidates:exact.slice(0,8).map(publicCandidate)};
-  if(exactAll.length&&!exact.length)return {...base,status:'DUPLICATE_CANDIDATE',confidence:0.35,needsReview:true,reason:'Faktur kandidat sudah dipakai oleh mutasi bank lain.',invoiceCandidates:exactAll.slice(0,8).map(publicCandidate)};
-  const nearby=invoices.filter(inv=>!usedInvoices.has(inv.id)&&dayDistance(inv.date,tx.date)<=2);
-  const groups=combinations(nearby,tx.credit);
-  if(groups.length===1){for(const inv of groups[0])usedInvoices.add(inv.id);return {...base,status:'MULTI_INVOICE_REVIEW',confidence:0.72,needsReview:true,reason:'Satu kredit sama dengan gabungan '+groups[0].length+' faktur. Wajib dikonfirmasi akuntan.',invoiceCandidates:groups[0].map(publicCandidate)};}
-  if(groups.length>1)return {...base,status:'AMBIGUOUS_REVIEW',confidence:0.4,needsReview:true,reason:'Ada beberapa kombinasi faktur dengan jumlah yang sama.',invoiceCandidates:groups.slice(0,3).flat().slice(0,8).map(publicCandidate)};
-  const larger=nearby.filter(inv=>inv.amount>tx.credit).sort((a,b)=>a.amount-b.amount);
-  if(larger.length===1)return {...base,status:'PARTIAL_PAYMENT',confidence:0.6,needsReview:true,reason:'Kredit lebih kecil daripada satu faktur terdekat; kemungkinan pembayaran sebagian.',invoiceCandidates:[publicCandidate(larger[0])]};
-  const smaller=nearby.filter(inv=>inv.amount<tx.credit).sort((a,b)=>b.amount-a.amount);
-  if(smaller.length===1)return {...base,status:'OVERPAYMENT_OR_DEPOSIT',confidence:0.5,needsReview:true,reason:'Kredit lebih besar daripada satu faktur terdekat; periksa lebih bayar atau deposit.',invoiceCandidates:[publicCandidate(smaller[0])]};
-  if(receiptMatches.length)return {...base,status:'RECEIPT_FOUND_NO_INVOICE_MATCH',confidence:0.55,needsReview:true,reason:'Penerimaan Penjualan bernominal sama ditemukan, tetapi faktur pasangan belum unik.',invoiceCandidates:[]};
-  return {...base,status:'UNMATCHED',confidence:0.2,needsReview:true,reason:'Tidak ditemukan faktur dengan nominal dan tanggal yang memenuhi aturan.',invoiceCandidates:[]};
-}
-function summary(rows){
-  const counts={};for(const row of rows)counts[row.status]=(counts[row.status]||0)+1;
-  return {creditTransactionCount:rows.length,totalCredit:money(rows.reduce((sum,row)=>sum+row.amount,0)),matchedHigh:rows.filter(x=>x.status==='MATCHED_RECEIPT_CANDIDATE'&&x.confidence>=0.9).length,invoiceFoundPaymentMissing:counts.INVOICE_FOUND_PAYMENT_MISSING||0,ambiguous:rows.filter(x=>/AMBIGUOUS|MULTI_INVOICE|PARTIAL|OVERPAYMENT|DUPLICATE|RECEIPT_FOUND/.test(x.status)).length,unmatched:counts.UNMATCHED||0,needsReview:rows.filter(x=>x.needsReview).length,statusCounts:counts};
-}
+function isoDate(v){const r=clean(v,30);let m=/^(20\d{2})-(\d{2})-(\d{2})/.exec(r);if(m)return `${m[1]}-${m[2]}-${m[3]}`;m=/^(\d{1,2})[\/-](\d{1,2})[\/-](20\d{2})/.exec(r);if(m)return `${m[3]}-${String(+m[2]).padStart(2,'0')}-${String(+m[1]).padStart(2,'0')}`;const d=new Date(r);return Number.isFinite(d.getTime())?d.toISOString().slice(0,10):null;}
+function day(v){const d=isoDate(v);return d?Math.floor(new Date(d+'T00:00:00Z').getTime()/86400000):null;}
+function dist(a,b){const x=day(a),y=day(b);return x==null||y==null?999:Math.abs(x-y);}
+function amount(r){return money(r?.totalPayment??r?.totalAmount??r?.paymentAmount??r?.amount??r?.grandTotal??0);}
+function scalar(v){if(v==null)return null;if(['string','number','boolean'].includes(typeof v))return v;if(typeof v==='object')return v.name??v.number??v.id??null;return null;}
+async function fetchReceipts(){let last='';for(const fields of ['id,number,transDate,totalAmount,customerName','id,number,transDate,totalAmount']){try{const rows=[];let page=1,pages=1;do{const {data}=await accurateGet('sales-receipt','list',{'sp.pageSize':100,'sp.page':page,'sp.sort':'transDate|desc',fields});rows.push(...(Array.isArray(data?.d)?data.d:[]));pages=Math.max(1,Math.min(Number(data?.sp?.pageCount)||1,20));page++;}while(page<=pages);return {ok:true,rows,fields,pages};}catch(e){last=clean(e?.message||e,500);}}return {ok:false,rows:[],error:last};}
+async function receiptDetail(id){const {data}=await accurateGet('sales-receipt','detail',{id});return data?.d??data??{};}
+function invoiceLinks(row){const ds=Array.isArray(row?.detailInvoice)?row.detailInvoice:[];return ds.map(d=>{const i=d?.invoice||d?.salesInvoice||d||{};return {id:clean(i?.id,100)||null,number:clean(i?.number||i?.invoiceNo,120)||null,date:isoDate(i?.transDate||i?.date),amount:money(d?.paymentAmount??d?.amount??d?.invoiceAmount??i?.totalAmount??i?.amount),customerName:clean(i?.customerName||i?.customer?.name||i?.customer,180)||null};}).filter(x=>x.id||x.number);}
+function detailView(r){return {id:clean(r?.id,100),number:clean(r?.number,120)||null,date:isoDate(r?.transDate||r?.date),amount:amount(r),description:clean(r?.description,200)||null,customerName:clean(r?.customerName||r?.customer?.name||r?.customer,180)||null,bankName:clean(scalar(r?.bank),180)||null,bankId:scalar(r?.bankId),bankJournalDetailId:scalar(r?.bankJournalDetailId),bankTransfer:scalar(r?.bankTransfer),paymentMethod:clean(r?.paymentMethod,80)||null,attachmentExist:r?.attachmentExist===true,attachmentCount:Number(r?.attachmentCount||0),invoices:invoiceLinks(r)};}
+function lion(r){return /lion\s*parcel/i.test(`${r.description||''} ${r.customerName||''} ${r.invoices.map(i=>i.customerName||'').join(' ')}`);}
+function statementBank(record){return clean(record?.bankName||record?.analysis?.bankName||record?.analysis?.bank||record?.bank||'',180);}
+function bankCompatible(record,r){const sb=statementBank(record).toLowerCase(),rb=clean(r.bankName,180).toLowerCase();if(!sb||!rb)return null;if(sb.includes('bca'))return rb.includes('bca');if(sb.includes('mandiri'))return rb.includes('mandiri');if(sb.includes('bri'))return rb.includes('bri');if(sb.includes('bni'))return rb.includes('bni');return sb===rb;}
+function base(tx){return {bankRow:tx.row,date:tx.date,amount:money(tx.credit),description:tx.description,reference:tx.reference||null};}
+function classify(tx,candidates,record,used){const b=base(tx);const available=candidates.filter(r=>!used.has(r.id));if(!available.length)return {...b,status:'UNMATCHED',confidence:0.2,needsReview:true,reason:'Tidak ditemukan Penerimaan Penjualan Lion Parcel dengan nominal dan tanggal yang memenuhi aturan V2.',receiptCandidates:[]};if(available.length>1)return {...b,status:'AMBIGUOUS_REVIEW',confidence:0.45,needsReview:true,reason:'Lebih dari satu Penerimaan Penjualan Lion Parcel cocok. Agent tidak memilih otomatis.',receiptCandidates:available.slice(0,8)};const r=available[0],bankOk=bankCompatible(record,r),invoiceOk=r.invoices.length>0,amountOk=Math.abs(r.amount-money(tx.credit))<=1,dateDays=dist(r.date,tx.date);if(amountOk&&dateDays<=2&&bankOk===true&&invoiceOk){used.add(r.id);return {...b,status:'MATCH_100',confidence:1,needsReview:false,reason:'Penerimaan Penjualan unik; nominal/tanggal cocok; bank Accurate sesuai rekening koran; detailInvoice membuktikan faktur terkait.',receipt:r,invoiceCandidates:r.invoices,evidence:{receiptDetail:true,bankVerified:true,invoiceLinked:true,attachmentAvailable:r.attachmentExist,attachmentCount:r.attachmentCount}};}used.add(r.id);const missing=[];if(bankOk!==true)missing.push(bankOk===false?'bank Accurate berbeda dengan rekening koran':'identitas bank rekening koran/Accurate belum cukup untuk verifikasi');if(!invoiceOk)missing.push('detailInvoice tidak tersedia');if(dateDays>2)missing.push('tanggal di luar toleransi');return {...b,status:'RECEIPT_DETAIL_REVIEW',confidence:bankOk===true&&invoiceOk?0.9:0.75,needsReview:true,reason:'Penerimaan unik ditemukan, tetapi belum memenuhi MATCH 100%: '+missing.join('; ')+'.',receipt:r,invoiceCandidates:r.invoices,evidence:{receiptDetail:true,bankVerified:bankOk===true,invoiceLinked:invoiceOk,attachmentAvailable:r.attachmentExist,attachmentCount:r.attachmentCount}};}
+function summarize(rows){const counts={};for(const r of rows)counts[r.status]=(counts[r.status]||0)+1;return {creditTransactionCount:rows.length,totalCredit:money(rows.reduce((s,r)=>s+r.amount,0)),match100:counts.MATCH_100||0,matchedAmount:money(rows.filter(r=>r.status==='MATCH_100').reduce((s,r)=>s+r.amount,0)),needsReview:rows.filter(r=>r.needsReview).length,unmatched:counts.UNMATCHED||0,statusCounts:counts};}
 export async function reconcileLionParcelStatement({statementId,session}){
-  const id=clean(statementId,100);if(!id)throw new Error('Statement ID wajib diisi.');
-  const key='statement/'+id,entry=await store().getWithMetadata(key,{type:'json',consistency:'strong'}),record=entry?.data;
-  if(!record)throw new Error('Rekening koran tidak ditemukan.');
-  if(record.status!=='CONFIRMED')throw new Error('Konfirmasi hasil pembacaan rekening koran sebelum rekonsiliasi.');
-  const [invoiceResult,receiptResult]=await Promise.all([
-    fetchAll('sales-invoice',['id,number,transDate,totalAmount,customerName,owing','id,number,transDate,totalAmount,customerName','id,number,transDate,totalAmount']),
-    fetchAll('sales-receipt',['id,number,transDate,totalAmount,customerName','id,number,transDate,totalAmount'])
-  ]);
-  if(!invoiceResult.ok)throw new Error('Faktur Penjualan Accurate tidak dapat dibaca: '+invoiceResult.error);
-  const transactions=Array.isArray(record.analysis?.transactions)?record.analysis.transactions:[],credits=transactions.filter(row=>Number(row.credit)>0&&row.date);
-  const minDay=Math.min(...credits.map(row=>dayNumber(row.date)).filter(Number.isFinite)),maxDay=Math.max(...credits.map(row=>dayNumber(row.date)).filter(Number.isFinite));
-  const invoices=invoiceResult.rows.map(invoiceView).filter(row=>row.id&&row.amount>0&&(!Number.isFinite(minDay)||dayNumber(row.date)>=minDay-2&&dayNumber(row.date)<=maxDay+2));
-  const receipts=receiptResult.rows.map(receiptView).filter(row=>row.id&&row.amount>0&&(!Number.isFinite(minDay)||dayNumber(row.date)>=minDay-2&&dayNumber(row.date)<=maxDay+2));
-  const usedInvoices=new Set(),rows=credits.map(tx=>matchCredit(tx,invoices,receipts,usedInvoices,receiptResult.ok));
-  const reconciliation={scope:'LION_PARCEL_SALES_RECEIPTS',method:'DETERMINISTIC_DATE_AMOUNT_V1',readOnly:true,generatedAt:now(),generatedBy:clean(session.username,100),dateToleranceDays:2,nameRequired:false,invoiceSource:{ok:true,rowsRead:invoiceResult.rows.length,periodCandidates:invoices.length,fields:invoiceResult.fields},receiptSource:{ok:receiptResult.ok,rowsRead:receiptResult.rows.length,periodCandidates:receipts.length,fields:receiptResult.fields,error:receiptResult.error},summary:summary(rows),rows};
-  const next={...record,reconciliation,reconciliationStatus:'REVIEW_REQUIRED',updatedAt:now()};
-  const write=await store().setJSON(key,next,{onlyIfMatch:entry.etag});if(!write.modified)throw new Error('Data berubah saat rekonsiliasi. Muat ulang lalu coba lagi.');
-  const publicRecord={...next};delete publicRecord.rawKeys;delete publicRecord.reviewNote;return publicRecord;
+ const id=clean(statementId,100);if(!id)throw new Error('Statement ID wajib diisi.');const key='statement/'+id,entry=await store().getWithMetadata(key,{type:'json',consistency:'strong'}),record=entry?.data;if(!record)throw new Error('Rekening koran tidak ditemukan.');if(record.status!=='CONFIRMED')throw new Error('Konfirmasi hasil pembacaan rekening koran sebelum rekonsiliasi.');
+ const txs=Array.isArray(record.analysis?.transactions)?record.analysis.transactions:[],credits=txs.filter(x=>Number(x.credit)>0&&x.date);if(!credits.length)throw new Error('Tidak ada mutasi kredit untuk direkonsiliasi.');const min=Math.min(...credits.map(x=>day(x.date)).filter(Number.isFinite)),max=Math.max(...credits.map(x=>day(x.date)).filter(Number.isFinite));
+ const rr=await fetchReceipts();if(!rr.ok)throw new Error('Penerimaan Penjualan Accurate tidak dapat dibaca: '+rr.error);const list=rr.rows.filter(r=>r?.id&&(!Number.isFinite(min)||day(r.transDate||r.date)>=min-2&&day(r.transDate||r.date)<=max+2));
+ const nominalDates=new Map();for(const tx of credits){const k=money(tx.credit);if(!nominalDates.has(k))nominalDates.set(k,[]);nominalDates.get(k).push(tx.date);}const prelim=list.filter(r=>{const a=amount(r),dates=nominalDates.get(a)||[];return dates.some(d=>dist(r.transDate||r.date,d)<=2);});
+ const details=[];for(const row of prelim){try{const d=detailView(await receiptDetail(row.id));if(lion(d))details.push(d);}catch{}}
+ const used=new Set(),rows=credits.map(tx=>classify(tx,details.filter(r=>Math.abs(r.amount-money(tx.credit))<=1&&dist(r.date,tx.date)<=2),record,used));
+ const reconciliation={scope:'LION_PARCEL_SALES_RECEIPTS',method:'DETERMINISTIC_RECEIPT_DETAIL_V2',readOnly:true,generatedAt:now(),generatedBy:clean(session.username,100),dateToleranceDays:2,nameRequired:false,statementBank:statementBank(record)||null,receiptSource:{ok:true,rowsRead:rr.rows.length,periodCandidates:list.length,detailProbed:prelim.length,lionReceiptDetails:details.length,fields:rr.fields},summary:summarize(rows),rows};
+ const next={...record,reconciliation,reconciliationStatus:rows.every(r=>!r.needsReview)?'MATCHED':'REVIEW_REQUIRED',updatedAt:now()};const write=await store().setJSON(key,next,{onlyIfMatch:entry.etag});if(!write.modified)throw new Error('Data berubah saat rekonsiliasi. Muat ulang lalu coba lagi.');const pub={...next};delete pub.rawKeys;delete pub.reviewNote;return pub;
 }
