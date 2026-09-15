@@ -1,5 +1,5 @@
 import { createBankStatementDraft, confirmBankStatement } from './_bank-statement-core.mjs';
-import { reconcileLionParcelStatement } from './_lion-parcel-reconcile-core.mjs';
+import { reconcileLionParcelStatement, checkLionParcelInvoices } from './_lion-parcel-reconcile-core.mjs';
 import { writeAdminAudit } from './_admin-audit-core.mjs';
 import { canRoleAccessPath } from './_admin-rbac-core.mjs';
 import { getAdminSession } from './_partner-core.mjs';
@@ -18,6 +18,11 @@ export default async request=>{
     const type=String(request.headers.get('content-type')||'');
     if(type.includes('application/json')){
       const body=await request.json(),action=clean(body?.action,40);
+      if(action==='check_lion_sales'){
+        const result=await checkLionParcelInvoices({dateFrom:body.dateFrom,dateTo:body.dateTo});
+        await writeAdminAudit({session,request,action:'LION_PARCEL_INVOICE_CHECK',entityType:'ACCURATE_SALES_INVOICE',entityId:null,after:result.summary,metadata:{readOnly:true,routingKey:'BRANCH',dateFrom:result.dateFrom,dateTo:result.dateTo}});
+        return json({ok:true,result});
+      }
       if(action==='confirm'){
         const result=await confirmBankStatement({statementId:body.statementId,session,note:body.note});
         await writeAdminAudit({session,request,action:'BANK_STATEMENT_CONFIRM',entityType:'BANK_STATEMENT',entityId:result.record.statementId,after:{status:result.record.status,transactionCount:result.record.validation?.transactionCount},metadata:{alreadyConfirmed:result.alreadyConfirmed}});
@@ -25,7 +30,7 @@ export default async request=>{
       }
       if(action==='reconcile_lion_parcel'){
         const record=await reconcileLionParcelStatement({statementId:body.statementId,session});
-        await writeAdminAudit({session,request,action:'LION_PARCEL_SALES_RECEIPT_RECONCILE',entityType:'BANK_STATEMENT',entityId:record.statementId,after:{scope:record.reconciliation?.scope,method:record.reconciliation?.method,summary:record.reconciliation?.summary},metadata:{readOnly:true,nameRequired:false,dateToleranceDays:2}});
+        await writeAdminAudit({session,request,action:'LION_PARCEL_SALES_RECEIPT_RECONCILE',entityType:'BANK_STATEMENT',entityId:record.statementId,after:{scope:record.reconciliation?.scope,method:record.reconciliation?.method,summary:record.reconciliation?.summary},metadata:{readOnly:true,nameRequired:false,dateToleranceDays:2,routingKey:'BRANCH'}});
         return json({ok:true,record});
       }
       return json({ok:false,message:'Aksi tidak dikenal.'},400);
@@ -36,18 +41,10 @@ export default async request=>{
     const pdfCount=uploads.filter(file=>file.type==='application/pdf').length;
     if(pdfCount&&uploads.length!==1)return json({ok:false,message:'PDF harus diunggah sendiri. Untuk foto, unggah beberapa foto sesuai urutan halaman.'},400);
     const files=[];let total=0;
-    for(const upload of uploads){
-      if(!ALLOWED.has(upload.type))return json({ok:false,message:'Format '+clean(upload.type,80)+' belum didukung. Gunakan PDF, JPG, PNG, atau foto HEIC yang dikonversi otomatis oleh halaman.'},400);
-      const buffer=Buffer.from(await upload.arrayBuffer());total+=buffer.length;
-      if(total>MAX_TOTAL)return json({ok:false,message:'Total file maksimal 5 MB setelah kompresi.'},413);
-      files.push({name:clean(upload.name,180)||('page-'+files.length),type:upload.type,buffer});
-    }
+    for(const upload of uploads){if(!ALLOWED.has(upload.type))return json({ok:false,message:'Format '+clean(upload.type,80)+' belum didukung. Gunakan PDF, JPG, PNG, atau foto HEIC yang dikonversi otomatis oleh halaman.'},400);const buffer=Buffer.from(await upload.arrayBuffer());total+=buffer.length;if(total>MAX_TOTAL)return json({ok:false,message:'Total file maksimal 5 MB setelah kompresi.'},413);files.push({name:clean(upload.name,180)||('page-'+files.length),type:upload.type,buffer});}
     const result=await createBankStatementDraft({files,session});
     await writeAdminAudit({session,request,action:result.duplicate?'BANK_STATEMENT_DUPLICATE':'BANK_STATEMENT_UPLOAD',entityType:'BANK_STATEMENT',entityId:result.record.statementId,after:{status:result.record.status,fileCount:result.record.files.length,transactionCount:result.record.validation?.transactionCount||0,balanceCheck:result.record.validation?.balanceCheck||null},metadata:{checksum:result.record.checksum}});
     return json({ok:true,...result});
-  }catch(error){
-    await writeAdminAudit({session,request,action:'BANK_STATEMENT_ERROR',entityType:'BANK_STATEMENT',entityId:null,status:'FAILED',note:clean(error?.message||error,500)}).catch(()=>{});
-    return json({ok:false,message:clean(error?.message||'Pemrosesan gagal.',700)},400);
-  }
+  }catch(error){await writeAdminAudit({session,request,action:'BANK_STATEMENT_ERROR',entityType:'BANK_STATEMENT',entityId:null,status:'FAILED',note:clean(error?.message||error,500)}).catch(()=>{});return json({ok:false,message:clean(error?.message||'Pemrosesan gagal.',700)},400);}
 };
 export const config={path:'/admin-ai-accurate-upload',method:'POST',rateLimit:{windowSize:3600,windowLimit:30,aggregateBy:'ip',action:'rate_limit'}};
