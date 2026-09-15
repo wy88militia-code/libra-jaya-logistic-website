@@ -13,6 +13,7 @@ const PATH_ROLES=[
  [/^\/admin-finance-billing$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-ai-accurate$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-ai-accurate-upload$/,['SUPERADMIN','FINANCE']],
+ [/^\/admin-libra-hc$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-manifest-accurate-monitor$/,['SUPERADMIN','FINANCE','OPS']],
  [/^\/admin-phase1-invoices$/,['SUPERADMIN','FINANCE']],
  [/^\/admin-phase1-accurate-si-uat$/,['SUPERADMIN','FINANCE']],
