@@ -11,7 +11,8 @@ function authorized(req:Request){const expected=clean(Netlify.env.get('LIBRA_HC_
 
 type CustomerMap={customerNo:string;accurateName:string;aliases:string[]};
 function customerMaster():CustomerMap[]{return [
- {customerNo:'C.00024',accurateName:'Ibu Herly',aliases:['Ibu Herly','Ibu herly/Pak Yudi','Herli','Herly','Herli Camp','Herly Camp']}
+ {customerNo:'C.00024',accurateName:'Ibu Herly',aliases:['Ibu Herly','Ibu herly/Pak Yudi','Herli','Herly','Herli Camp','Herly Camp']},
+ {customerNo:'C.00201',accurateName:'KIL - HC SPR',aliases:['KIL','KIL - HC SPR']}
 ];}
 function mappedCustomer(name:string){const n=norm(name);if(!n)return null;return customerMaster().find(m=>m.aliases.some(a=>n===norm(a)))||null;}
 async function verifyMappedCustomer(m:CustomerMap,sourceName:string){const probe=await probeAccurateCustomerByName(m.customerNo);const exact=(probe?.matches||[]).find((x:any)=>norm(x?.no)===norm(m.customerNo));if(!exact)throw new Error(`Mapping customer HC ${sourceName} menunjuk ${m.customerNo}, tetapi Customer No tersebut tidak ditemukan di Accurate.`);return {selected:exact,recommended:exact,matches:probe.matches,count:probe.count,queriedName:m.customerNo,sourceName,mapping:'HC_CUSTOMER_MASTER_EXACT',verifiedCustomerNo:true};}
