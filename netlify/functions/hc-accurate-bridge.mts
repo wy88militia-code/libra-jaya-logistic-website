@@ -7,12 +7,22 @@ const money=(v:unknown)=>Math.max(0,Math.round(Number(v)||0));
 const norm=(v:unknown)=>clean(v,240).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 function authorized(req:Request){const expected=clean(Netlify.env.get('LIBRA_HC_BRIDGE_SECRET'),500);const got=clean(req.headers.get('x-libra-hc-secret'),500);return Boolean(expected&&got&&expected===got);}
 function hcCustomerName(sourceName:string){const s=clean(sourceName,200).replace(/\s*-\s*HC\s+SPR\s*$/i,'').trim();return s?`${s} - HC SPR`:'';}
+function hcBaseName(sourceName:string){return clean(sourceName,200).replace(/\s*-\s*HC\s+SPR\s*$/i,'').trim();}
 function customerRow(x:any){return {id:x?.id??null,no:clean(x?.no,120),name:clean(x?.name,240),suspended:x?.suspended,disabled:x?.disabled,active:x?.active};}
 function usableCustomer(x:any){return x?.active!==false&&x?.disabled!==true&&x?.suspended!==true&&Boolean(clean(x?.no,120)&&clean(x?.name,240));}
+const HC_CUSTOMERS:Record<string,{no:string;name:string}>={kil:{no:'C.00201',name:'KIL - HC SPR'}};
 async function resolveCustomer(sourceName:string){
- const expectedCustomerName=hcCustomerName(sourceName);
+ const expectedCustomerName=hcCustomerName(sourceName),base=hcBaseName(sourceName);
  if(!expectedCustomerName)return {selected:null,recommended:null,matches:[],count:0,sourceName,expectedCustomerName,mapping:'HC_SPR_EXACT_NAME',registered:false,error:'Nama konsinyi kosong.'};
  try{
+  const known=HC_CUSTOMERS[norm(base)];
+  if(known){
+   const probe=await probeAccurateCustomerByName(known.no);
+   const matches=(Array.isArray(probe?.matches)?probe.matches:[]).map(customerRow).filter(usableCustomer);
+   const exact=matches.find((x:any)=>norm(x.no)===norm(known.no)&&norm(x.name)===norm(known.name))||null;
+   if(!exact)return {selected:null,recommended:null,matches:[],count:0,sourceName,expectedCustomerName:known.name,queriedName:known.no,mapping:'HC_CUSTOMER_NO_MASTER',registered:false,error:`Customer HC ${known.no} · ${known.name} tidak dapat diverifikasi di Accurate.`};
+   return {selected:exact,recommended:exact,matches:[exact],count:1,sourceName,expectedCustomerName:known.name,queriedName:known.no,mapping:'HC_CUSTOMER_NO_MASTER',registered:true,verifiedCustomerNo:true,verifiedExactName:true};
+  }
   const probe=await probeAccurateCustomerByName(expectedCustomerName);
   const matches=(Array.isArray(probe?.matches)?probe.matches:[]).map(customerRow).filter(usableCustomer);
   const exact=matches.find((x:any)=>norm(x.name)===norm(expectedCustomerName))||null;
