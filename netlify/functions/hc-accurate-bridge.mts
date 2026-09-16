@@ -11,11 +11,11 @@ type CustomerMap={customerNo:string;accurateName:string;aliases:string[]};
 function customerMaster():CustomerMap[]{return [
  {customerNo:'C.00024',accurateName:'Ibu Herly',aliases:['Ibu Herly','Ibu herly/Pak Yudi','Herli','Herly','Herli Camp','Herly Camp']}
 ];}
-function mappedCustomer(name:string){const n=norm(name);if(!n)return null;return customerMaster().find(m=>m.aliases.some(a=>{const x=norm(a);return n===x||n.includes(x)||x.includes(n)}))||null;}
-async function verifyMappedCustomer(m:CustomerMap,sourceName:string){const probe=await probeAccurateCustomerByName(m.customerNo);const exact=(probe?.matches||[]).find((x:any)=>norm(x?.no)===norm(m.customerNo));if(!exact)throw new Error(`Mapping customer HC ${sourceName} menunjuk ${m.customerNo}, tetapi Customer No tersebut tidak ditemukan di Accurate.`);return {selected:exact,recommended:exact,matches:probe.matches,count:probe.count,queriedName:m.customerNo,sourceName,mapping:'HC_CUSTOMER_MASTER',verifiedCustomerNo:true};}
+function mappedCustomer(name:string){const n=norm(name);if(!n)return null;return customerMaster().find(m=>m.aliases.some(a=>n===norm(a)))||null;}
+async function verifyMappedCustomer(m:CustomerMap,sourceName:string){const probe=await probeAccurateCustomerByName(m.customerNo);const exact=(probe?.matches||[]).find((x:any)=>norm(x?.no)===norm(m.customerNo));if(!exact)throw new Error(`Mapping customer HC ${sourceName} menunjuk ${m.customerNo}, tetapi Customer No tersebut tidak ditemukan di Accurate.`);return {selected:exact,recommended:exact,matches:probe.matches,count:probe.count,queriedName:m.customerNo,sourceName,mapping:'HC_CUSTOMER_MASTER_EXACT',verifiedCustomerNo:true};}
 async function resolveCustomer(name:string){
  const mapped=mappedCustomer(name);
- if(mapped){try{return await verifyMappedCustomer(mapped,name);}catch(e:any){return {selected:null,recommended:null,matches:[],count:0,sourceName:name,mapping:'HC_CUSTOMER_MASTER',mappedCustomerNo:mapped.customerNo,error:clean(e?.message||e,500),verifiedCustomerNo:false};}}
+ if(mapped){try{return await verifyMappedCustomer(mapped,name);}catch(e:any){return {selected:null,recommended:null,matches:[],count:0,sourceName:name,mapping:'HC_CUSTOMER_MASTER_EXACT',mappedCustomerNo:mapped.customerNo,error:clean(e?.message||e,500),verifiedCustomerNo:false};}}
  try{const probe=await probeAccurateCustomerByName(name);if(probe?.matches?.length){const selected=resolveLatestActiveCustomer(probe);return {selected,recommended:selected,matches:probe.matches,count:probe.count,queriedName:name,sourceName:name,mapping:'ACTIVE_NAME_MATCH',verifiedActive:true};}return {selected:null,recommended:null,matches:[],count:0,sourceName:name,mapping:'UNMAPPED',verifiedActive:false};}
  catch(e:any){return {selected:null,recommended:null,matches:[],count:0,sourceName:name,mapping:'UNMAPPED',error:clean(e?.message||e,500),verifiedActive:false};}
 }
