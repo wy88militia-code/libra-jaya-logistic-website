@@ -21,7 +21,8 @@ export default async request=>{
       const body=await request.json(),action=clean(body?.action,40);
       if(action==='check_lion_sales'){
         const result=await checkLionSales({dateFrom:body.dateFrom,dateTo:body.dateTo});
-        await writeAdminAudit({session,request,action:'LION_PARCEL_INVOICE_CHECK',entityType:'ACCURATE_SALES_INVOICE',entityId:null,after:result.summary,metadata:{readOnly:true,routingKey:'BRANCH',dateFrom:result.dateFrom,dateTo:result.dateTo}});
+        // Read-only sales checking must not be blocked by an audit-store write failure.
+        await writeAdminAudit({session,request,action:'LION_PARCEL_INVOICE_CHECK',entityType:'ACCURATE_SALES_INVOICE',entityId:null,after:result.summary,metadata:{readOnly:true,routingKey:'BRANCH',dateFrom:result.dateFrom,dateTo:result.dateTo}}).catch(()=>{});
         return json({ok:true,result});
       }
       if(action==='confirm'){
