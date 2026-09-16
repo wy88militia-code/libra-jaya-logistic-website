@@ -1,5 +1,6 @@
 import { createBankStatementDraft, confirmBankStatement } from './_bank-statement-core.mjs';
-import { reconcileLionParcelStatement, checkLionParcelInvoices } from './_lion-parcel-reconcile-core.mjs';
+import { reconcileLionParcelStatement } from './_lion-parcel-reconcile-core.mjs';
+import { checkLionSales } from './_lion-sales-check.mjs';
 import { writeAdminAudit } from './_admin-audit-core.mjs';
 import { canRoleAccessPath } from './_admin-rbac-core.mjs';
 import { getAdminSession } from './_partner-core.mjs';
@@ -19,7 +20,7 @@ export default async request=>{
     if(type.includes('application/json')){
       const body=await request.json(),action=clean(body?.action,40);
       if(action==='check_lion_sales'){
-        const result=await checkLionParcelInvoices({dateFrom:body.dateFrom,dateTo:body.dateTo});
+        const result=await checkLionSales({dateFrom:body.dateFrom,dateTo:body.dateTo});
         await writeAdminAudit({session,request,action:'LION_PARCEL_INVOICE_CHECK',entityType:'ACCURATE_SALES_INVOICE',entityId:null,after:result.summary,metadata:{readOnly:true,routingKey:'BRANCH',dateFrom:result.dateFrom,dateTo:result.dateTo}});
         return json({ok:true,result});
       }
