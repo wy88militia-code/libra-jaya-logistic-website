@@ -39,17 +39,27 @@ function responsePageCount(data:any){
 }
 function normalizeCustomerNo(v:any){return String(v??'').trim().toUpperCase().replace(/\s+/g,'');}
 async function resolveCustomerByDetail(no:string){
-  const candidates=[no,normalizeCustomerNo(no)];
-  for(const candidate of [...new Set(candidates)].filter(Boolean)){
-    for(const key of ['no','id']){
-      try{
-        const {data}=await accurateGet('customer','detail',{[key]:candidate});
-        const raw=data?.d&&typeof data.d==='object'&&!Array.isArray(data.d)?data.d:data;
-        const row=customerRow(raw);
-        if(usableCustomer(row)&&normalizeCustomerNo(row.no)===normalizeCustomerNo(no))return row;
-      }catch{}
-    }
-  }
+  const target=normalizeCustomerNo(no);
+  // Accurate customer/list in API_TOKEN mode exposes only internal id unless
+  // detail fields are requested. Read ids, then resolve authoritative no/name
+  // from customer/detail by internal id.
+  let page=1,pageCount=1;
+  do{
+    try{
+      const {data}=await accurateGet('customer','list',{'sp.pageSize':100,'sp.page':page});
+      const ids=customerRows(data).map((x:any)=>x?.id).filter((id:any)=>id!==null&&id!==undefined);
+      for(const id of ids){
+        try{
+          const detailRes=await accurateGet('customer','detail',{id});
+          const raw=detailRes.data?.d&&typeof detailRes.data.d==='object'&&!Array.isArray(detailRes.data.d)?detailRes.data.d:detailRes.data;
+          const row=customerRow(raw);
+          if(normalizeCustomerNo(row.no)===target&&clean(row.name,240))return row;
+        }catch{}
+      }
+      pageCount=responsePageCount(data);
+    }catch{break}
+    page+=1;
+  }while(page<=pageCount);
   return null;
 }
 // Deployment marker: MASTER_ACCURATE_VERIFY_GATE_V2
