@@ -6,7 +6,7 @@ const clean=(v:unknown,n=500)=>String(v??'').trim().slice(0,n);
 const money=(v:unknown)=>Math.max(0,Math.round(Number(v)||0));
 const norm=(v:unknown)=>clean(v,240).toLowerCase().replace(/[^a-z0-9]+/g,' ').trim().replace(/\s+/g,' ');
 function authorized(req:Request){const expected=clean(Netlify.env.get('LIBRA_HC_BRIDGE_SECRET'),500);const got=clean(req.headers.get('x-libra-hc-secret'),500);return Boolean(expected&&got&&expected===got);}
-function customerRow(x:any){return {id:x?.id??null,no:clean(x?.no,120),name:clean(x?.name,240),suspended:x?.suspended,disabled:x?.disabled,active:x?.active};}
+function customerRow(x:any){return {id:x?.id??null,no:clean(x?.no??x?.customerNo??x?.number??x?.code,120),name:clean(x?.name??x?.customerName??x?.description,240),suspended:x?.suspended,disabled:x?.disabled,active:x?.active};}
 function usableCustomer(x:any){return Boolean(clean(x?.no,120)&&clean(x?.name,240));}
 function statusBlocked(x:any){return x?.active===false||x?.disabled===true||x?.suspended===true;}
 function customerRows(data:any){
@@ -31,7 +31,7 @@ function responseShape(data:any){
   const d=data?.d;
   const topKeys=data&&typeof data==='object'?Object.keys(data).slice(0,20):[];
   const dKeys=d&&typeof d==='object'&&!Array.isArray(d)?Object.keys(d).slice(0,20):[];
-  return {topKeys,dType:Array.isArray(d)?'array':typeof d,dKeys,rowCount:customerRows(data).length};
+  const rawRows=customerRows(data);const sampleKeys=rawRows.slice(0,3).map((x:any)=>x&&typeof x==='object'?Object.keys(x).slice(0,20):[]);const sample=rawRows.slice(0,3).map((x:any)=>({id:x?.id??null,no:x?.no??x?.customerNo??x?.number??x?.code??null,name:x?.name??x?.customerName??x?.description??null}));return {topKeys,dType:Array.isArray(d)?'array':typeof d,dKeys,rowCount:rawRows.length,sampleKeys,sample};
 }
 function responsePageCount(data:any){
   const value=Number(data?.sp?.pageCount??data?.d?.sp?.pageCount??data?.pagination?.pageCount??data?.d?.pagination?.pageCount);
