@@ -1,0 +1,57 @@
+name: JLX Accurate OpenAPI Schema Audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/jlx-accurate-schema-audit.yml"
+      - "netlify/functions/jl-accurate-bridge.mts"
+  workflow_dispatch:
+
+jobs:
+  schema-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Accurate OpenAPI
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 2 https://account.accurate.id/open-api/json.do -o /tmp/accurate-openapi.json
+          python - <<'PY'
+          import json
+          p="/tmp/accurate-openapi.json"
+          doc=json.load(open(p,encoding="utf-8"))
+          assert isinstance(doc,dict) and isinstance(doc.get("paths"),dict) and doc["paths"], "OpenAPI paths missing"
+          targets=[
+            "sales-invoice/save.do",
+            "purchase-invoice/save.do",
+            "sales-receipt/save.do",
+            "sales-invoice/create-down-payment.do",
+          ]
+          def names(x,out):
+            if isinstance(x,dict):
+              n=x.get("name")
+              if isinstance(n,str): out.add(n)
+              props=x.get("properties")
+              if isinstance(props,dict): out.update(map(str,props.keys()))
+              for v in x.values(): names(v,out)
+            elif isinstance(x,list):
+              for v in x: names(v,out)
+          print("OPENAPI_VERSION",doc.get("swagger") or doc.get("openapi") or "unknown")
+          for target in targets:
+            matches=[k for k in doc["paths"] if target in k]
+            print("\nTARGET",target)
+            print("PATHS",matches)
+            for path in matches:
+              for method,op in doc["paths"][path].items():
+                if method.lower() not in {"get","post","put","patch","delete"} or not isinstance(op,dict): continue
+                out=set(); names(op,out)
+                dim=sorted(x for x in out if any(t in x.lower() for t in ["sales","warehouse","project","department","branch","customer","vendor","item","downpayment","invoice","payment","description","transdate","number","no"]))
+                print("METHOD",method.upper(),"PATH",path)
+                print("DIMENSION_AND_CORE_FIELDS",dim)
+                params=op.get("parameters",[])
+                direct=[x.get("name") for x in params if isinstance(x,dict) and isinstance(x.get("name"),str)]
+                print("DIRECT_PARAMETERS",direct)
+          # Resource existence probes from documented paths only.
+          for resource in ["employee","salesman","warehouse","project","department","branch","vendor","item"]:
+            matches=sorted(k for k in doc["paths"] if f"/{resource}/" in k)
+            print("\nRESOURCE",resource,"COUNT",len(matches),"SAMPLE",matches[:8])
+          PY
