@@ -91,3 +91,42 @@ jobs:
                     if any(t in pth2.lower() for t in ["no","name","number","sales"]):
                       print("MASTER_FIELD",resource,pth2,json.dumps(frag,ensure_ascii=False)[:1800])
           PY
+      - name: Resolve master response schemas
+        run: |
+          python - <<'PY'
+          import json
+          doc=json.load(open("/tmp/accurate-openapi.json",encoding="utf-8"))
+          def deref(x,seen=None):
+            if seen is None: seen=set()
+            if isinstance(x,dict) and "$ref" in x:
+              ref=x["$ref"]
+              if ref in seen:return {"$ref":ref}
+              cur=doc
+              for part in ref.lstrip("#/").split("/"): cur=cur[part]
+              return deref(cur,seen|{ref})
+            if isinstance(x,dict): return {k:deref(v,seen) for k,v in x.items()}
+            if isinstance(x,list): return [deref(v,seen) for v in x]
+            return x
+          def collect_props(x,out=None):
+            if out is None: out={}
+            if isinstance(x,dict):
+              props=x.get("properties")
+              if isinstance(props,dict):
+                for k,v in props.items():
+                  if k not in out: out[k]=v
+              for v in x.values(): collect_props(v,out)
+            elif isinstance(x,list):
+              for v in x: collect_props(v,out)
+            return out
+          for resource in ["employee","project","department","warehouse"]:
+            for suffix in ["list.do","detail.do"]:
+              p=f"/api/{resource}/{suffix}"
+              op=doc.get("paths",{}).get(p,{}).get("get")
+              if not op: continue
+              resolved=deref(op)
+              props=collect_props(resolved)
+              picked={k:v for k,v in props.items() if any(t in k.lower() for t in ["no","number","name","salesman","suspend","active","id"])}
+              print("\nRESOLVED_MASTER",resource,suffix)
+              for k,v in sorted(picked.items()):
+                print("FIELD",k,json.dumps(v,ensure_ascii=False)[:1800])
+          PY
