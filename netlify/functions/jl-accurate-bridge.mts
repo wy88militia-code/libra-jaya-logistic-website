@@ -3,6 +3,13 @@ import type {Config} from '@netlify/functions';
 import {accurateConfigStatus, accurateGet, resolveAccurateConnection, validateAccurateBranch} from './_accurate-core.mjs';
 const clean=(v,n=160)=>String(v??'').trim().slice(0,n);
 const json=(body,status=200)=>Response.json(body,{status,headers:{'cache-control':'no-store'}});
+function bridgeAuth(){
+  const dedicated=clean(Netlify.env.get('LIBRA_JL_BRIDGE_SECRET'),1000);
+  if(dedicated.length>=32)return {key:dedicated,mode:'DEDICATED'};
+  const gateway=clean(Netlify.env.get('JL_SSOT_GATEWAY_TOKEN'),1000);
+  if(gateway.length>=32)return {key:crypto.createHmac('sha256',gateway).update('JLX_ACCURATE_PREFLIGHT_V1').digest('hex'),mode:'DERIVED_SSOT_READ_ONLY'};
+  return {key:'',mode:'MISSING'};
+}
 async function master(resource,no){
   if (!no) return null;
   const {data}=await accurateGet(resource,'list',{'sp.pageSize':20,'sp.page':1,fields:'id,no,name','filter.no.op':'EQUAL','filter.no.val[0]':no});
@@ -21,8 +28,8 @@ async function master(resource,no){
 }
 export default async (request:Request)=>{
   if(request.method!=='POST')return json({ok:false,message:'Method not allowed'},405);
-  const secret=Netlify.env.get('LIBRA_JL_BRIDGE_SECRET')||'',stamp=request.headers.get('x-jl-timestamp')||'',signature=request.headers.get('x-jl-signature')||'';
-  if(secret.length<32)return json({ok:false,message:'Jalur JL–Libra belum dikonfigurasi.'},503);
+  const auth=bridgeAuth(),secret=auth.key,stamp=request.headers.get('x-jl-timestamp')||'',signature=request.headers.get('x-jl-signature')||'';
+  if(secret.length<32)return json({ok:false,message:'Jalur JL–Libra belum dikonfigurasi.',authMode:auth.mode},503);
   if(!/^\d{13}$/.test(stamp)||Math.abs(Date.now()-Number(stamp))>60000||! /^[a-f0-9]{64}$/.test(signature))return json({ok:false,message:'Unauthorized'},401);
   const raw=await request.text();if(Buffer.byteLength(raw)>32000)return json({ok:false,message:'Request terlalu besar'},413);
   const expected=crypto.createHmac('sha256',secret).update(`${stamp}.${raw}`).digest('hex');
@@ -36,7 +43,7 @@ export default async (request:Request)=>{
       if(intent.source!=='JLX_DJJ'||intent.postingGuard!=='OUTBOX_ONLY_NO_ACCURATE_WRITE'||!allowedTypes.has(clean(intent.intentType,60)))throw new Error('Accounting intent JLX tidak valid.');
       if(!clean(intent.idempotencyKey,220))throw new Error('Idempotency key accounting intent wajib tersedia.');
       const config=accurateConfigStatus();
-      if(!config.configured)return json({ok:true,ready:false,masterReady:false,schemaReady:false,intentType:intent.intentType,reasons:['Koneksi Accurate Libra belum dikonfigurasi.'],guard:'READ_ONLY_NO_POST',postingEnabled:false});
+      if(!config.configured)return json({ok:true,ready:false,masterReady:false,schemaReady:false,intentType:intent.intentType,reasons:['Koneksi Accurate Libra belum dikonfigurasi.'],guard:'READ_ONLY_NO_POST',postingEnabled:false,authMode:auth.mode});
       const connection=await resolveAccurateConnection(),db=connection.database||{},databaseName=clean(db.alias||db.name||db.databaseName||db.companyName),expectedDb=clean(Netlify.env.get('ACCURATE_PRODUCTION_DATABASE_NAME')),reasons:string[]=[];
       if(!databaseName||!expectedDb||databaseName.toLowerCase()!==expectedDb.toLowerCase()||/(test|tes|uat|sandbox)/i.test(databaseName))reasons.push('Identitas database production Accurate Libra belum cocok.');
       const branchTarget=clean(intent.dimensions?.branchName||'JLX DJJ',160),branch=await validateAccurateBranch(branchTarget);
