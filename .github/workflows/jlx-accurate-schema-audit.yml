@@ -80,4 +80,14 @@ jobs:
           for resource in ["employee","salesman","warehouse","project","department","branch","vendor","item"]:
             matches=sorted(k for k in doc["paths"] if f"/{resource}/" in k)
             print("\nRESOURCE",resource,"COUNT",len(matches),"SAMPLE",matches[:8])
+            if resource in {"employee","warehouse","project","department"}:
+              for pth in [x for x in matches if x.endswith("/list.do") or x.endswith("/detail.do")]:
+                for method,op in doc["paths"][pth].items():
+                  if method.lower() not in {"get","post"} or not isinstance(op,dict): continue
+                  out=set(); names(op,out)
+                  important=sorted(x for x in out if any(t in x.lower() for t in ["no","name","number","sales","active","suspend","id"]))
+                  print("MASTER_SCHEMA",resource,method.upper(),pth,important)
+                  for pth2,frag in field_fragments(op):
+                    if any(t in pth2.lower() for t in ["no","name","number","sales"]):
+                      print("MASTER_FIELD",resource,pth2,json.dumps(frag,ensure_ascii=False)[:1800])
           PY
