@@ -1,0 +1,132 @@
+name: JLX Accurate OpenAPI Schema Audit
+
+on:
+  pull_request:
+    paths:
+      - ".github/workflows/jlx-accurate-schema-audit.yml"
+      - "netlify/functions/jl-accurate-bridge.mts"
+  workflow_dispatch:
+
+jobs:
+  schema-audit:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Fetch Accurate OpenAPI
+        run: |
+          set -euo pipefail
+          curl -fsSL --retry 3 --retry-delay 2 https://account.accurate.id/open-api/json.do -o /tmp/accurate-openapi.json
+          python - <<'PY'
+          import json
+          p="/tmp/accurate-openapi.json"
+          doc=json.load(open(p,encoding="utf-8"))
+          assert isinstance(doc,dict) and isinstance(doc.get("paths"),dict) and doc["paths"], "OpenAPI paths missing"
+          targets=[
+            "sales-invoice/save.do",
+            "purchase-invoice/save.do",
+            "sales-receipt/save.do",
+            "sales-invoice/create-down-payment.do",
+          ]
+          def names(x,out):
+            if isinstance(x,dict):
+              n=x.get("name")
+              if isinstance(n,str): out.add(n)
+              props=x.get("properties")
+              if isinstance(props,dict): out.update(map(str,props.keys()))
+              for v in x.values(): names(v,out)
+            elif isinstance(x,list):
+              for v in x: names(v,out)
+          print("OPENAPI_VERSION",doc.get("swagger") or doc.get("openapi") or "unknown")
+          for target in targets:
+            matches=[k for k in doc["paths"] if target in k]
+            print("\nTARGET",target)
+            print("PATHS",matches)
+            for path in matches:
+              for method,op in doc["paths"][path].items():
+                if method.lower() not in {"get","post","put","patch","delete"} or not isinstance(op,dict): continue
+                out=set(); names(op,out)
+                dim=sorted(x for x in out if any(t in x.lower() for t in ["sales","warehouse","project","department","branch","customer","vendor","item","downpayment","invoice","payment","description","transdate","number","no"]))
+                print("METHOD",method.upper(),"PATH",path)
+                print("DIMENSION_AND_CORE_FIELDS",dim)
+                params=op.get("parameters",[])
+                direct=[x.get("name") for x in params if isinstance(x,dict) and isinstance(x.get("name"),str)]
+                print("DIRECT_PARAMETERS",direct)
+          # Print exact schema fragments for JLX-relevant fields without dumping the full spec.
+          wanted={"salesmanListNumber","departmentName","projectNo","warehouseName","branchName","customerNo","vendorNo","bankNo","detailInvoice","detailItem","detailDownPayment","dpAmount","chequeAmount","paymentAmount","unitPrice","quantity","itemNo","invoiceNumber"}
+          def field_fragments(x,path="root",out=None):
+            if out is None: out=[]
+            if isinstance(x,dict):
+              if x.get("name") in wanted:
+                out.append((path+".name="+str(x.get("name")), {k:x.get(k) for k in ["name","in","required","description","schema","type"] if k in x}))
+              props=x.get("properties")
+              if isinstance(props,dict):
+                for k,v in props.items():
+                  if k in wanted:
+                    out.append((path+".properties."+k,v))
+              for k,v in x.items():
+                field_fragments(v,path+"."+str(k),out)
+            elif isinstance(x,list):
+              for i,v in enumerate(x): field_fragments(v,path+f"[{i}]",out)
+            return out
+          for target in targets:
+            matches=[k for k in doc["paths"] if target in k]
+            for pth in matches:
+              for method,op in doc["paths"][pth].items():
+                if method.lower() not in {"get","post","put","patch"} or not isinstance(op,dict): continue
+                print("\nFIELD_SCHEMA",target,method.upper())
+                for pth2,frag in field_fragments(op):
+                  print(pth2,json.dumps(frag,ensure_ascii=False)[:2500])
+
+          # Resource existence probes from documented paths only.
+          for resource in ["employee","salesman","warehouse","project","department","branch","vendor","item"]:
+            matches=sorted(k for k in doc["paths"] if f"/{resource}/" in k)
+            print("\nRESOURCE",resource,"COUNT",len(matches),"SAMPLE",matches[:8])
+            if resource in {"employee","warehouse","project","department"}:
+              for pth in [x for x in matches if x.endswith("/list.do") or x.endswith("/detail.do")]:
+                for method,op in doc["paths"][pth].items():
+                  if method.lower() not in {"get","post"} or not isinstance(op,dict): continue
+                  out=set(); names(op,out)
+                  important=sorted(x for x in out if any(t in x.lower() for t in ["no","name","number","sales","active","suspend","id"]))
+                  print("MASTER_SCHEMA",resource,method.upper(),pth,important)
+                  for pth2,frag in field_fragments(op):
+                    if any(t in pth2.lower() for t in ["no","name","number","sales"]):
+                      print("MASTER_FIELD",resource,pth2,json.dumps(frag,ensure_ascii=False)[:1800])
+          PY
+      - name: Resolve master response schemas
+        run: |
+          python - <<'PY'
+          import json
+          doc=json.load(open("/tmp/accurate-openapi.json",encoding="utf-8"))
+          def deref(x,seen=None):
+            if seen is None: seen=set()
+            if isinstance(x,dict) and "$ref" in x:
+              ref=x["$ref"]
+              if ref in seen:return {"$ref":ref}
+              cur=doc
+              for part in ref.lstrip("#/").split("/"): cur=cur[part]
+              return deref(cur,seen|{ref})
+            if isinstance(x,dict): return {k:deref(v,seen) for k,v in x.items()}
+            if isinstance(x,list): return [deref(v,seen) for v in x]
+            return x
+          def collect_props(x,out=None):
+            if out is None: out={}
+            if isinstance(x,dict):
+              props=x.get("properties")
+              if isinstance(props,dict):
+                for k,v in props.items():
+                  if k not in out: out[k]=v
+              for v in x.values(): collect_props(v,out)
+            elif isinstance(x,list):
+              for v in x: collect_props(v,out)
+            return out
+          for resource in ["employee","project","department","warehouse"]:
+            for suffix in ["list.do","detail.do"]:
+              p=f"/api/{resource}/{suffix}"
+              op=doc.get("paths",{}).get(p,{}).get("get")
+              if not op: continue
+              resolved=deref(op)
+              props=collect_props(resolved)
+              picked={k:v for k,v in props.items() if any(t in k.lower() for t in ["no","number","name","salesman","suspend","active","id"])}
+              print("\nRESOLVED_MASTER",resource,suffix)
+              for k,v in sorted(picked.items()):
+                print("FIELD",k,json.dumps(v,ensure_ascii=False)[:1800])
+          PY
