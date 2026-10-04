@@ -50,6 +50,32 @@ jobs:
                 params=op.get("parameters",[])
                 direct=[x.get("name") for x in params if isinstance(x,dict) and isinstance(x.get("name"),str)]
                 print("DIRECT_PARAMETERS",direct)
+          # Print exact schema fragments for JLX-relevant fields without dumping the full spec.
+          wanted={"salesmanListNumber","departmentName","projectNo","warehouseName","branchName","customerNo","vendorNo","bankNo","detailInvoice","detailItem","detailDownPayment","dpAmount","chequeAmount","paymentAmount","unitPrice","quantity","itemNo","invoiceNumber"}
+          def field_fragments(x,path="root",out=None):
+            if out is None: out=[]
+            if isinstance(x,dict):
+              if x.get("name") in wanted:
+                out.append((path+".name="+str(x.get("name")), {k:x.get(k) for k in ["name","in","required","description","schema","type"] if k in x}))
+              props=x.get("properties")
+              if isinstance(props,dict):
+                for k,v in props.items():
+                  if k in wanted:
+                    out.append((path+".properties."+k,v))
+              for k,v in x.items():
+                field_fragments(v,path+"."+str(k),out)
+            elif isinstance(x,list):
+              for i,v in enumerate(x): field_fragments(v,path+f"[{i}]",out)
+            return out
+          for target in targets:
+            matches=[k for k in doc["paths"] if target in k]
+            for pth in matches:
+              for method,op in doc["paths"][pth].items():
+                if method.lower() not in {"get","post","put","patch"} or not isinstance(op,dict): continue
+                print("\nFIELD_SCHEMA",target,method.upper())
+                for pth2,frag in field_fragments(op):
+                  print(pth2,json.dumps(frag,ensure_ascii=False)[:2500])
+
           # Resource existence probes from documented paths only.
           for resource in ["employee","salesman","warehouse","project","department","branch","vendor","item"]:
             matches=sorted(k for k in doc["paths"] if f"/{resource}/" in k)
