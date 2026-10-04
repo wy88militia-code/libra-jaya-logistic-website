@@ -2,7 +2,7 @@
   command = "node scripts/stamp-release.mjs"
   publish = "."
 
-# Deploy trigger: 2026-09-17 Accurate AI Agent 5 branch workspaces
+# Deploy trigger: 2026-10-05 JL-Libra Accurate bridge secret
 
 [[redirects]]
   from = "/partner/manual-booking"
