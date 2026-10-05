@@ -81,6 +81,15 @@ async function readJlMaster(request){
   if(!r.ok||!body?.ranges)throw new Error(body?.message||'Master JL Express tidak dapat dibaca.');
   return body;
 }
+export async function listPtpDestinations(request){
+  const master=await readJlMaster(request),rows=master.ranges?.rate||[],today=new Date().toISOString().slice(0,10),seen=new Map();
+  for(const r of rows.slice(1)){
+    if(upper(r[1]||'CGK')!=='CGK'||!activeRate(r))continue;
+    const code=upper(r[3]);if(!/^[A-Z]{3}$/.test(code)||code==='CGK')continue;
+    if(!seen.has(code))seen.set(code,{code,name:clean(r[4])||code});
+  }
+  return [...seen.values()].sort((a,b)=>a.name.localeCompare(b.name,'id'));
+}
 export async function quotePtp(request,input={}){
   const destination=upper(input.destinationAirport);
   if(!/^[A-Z]{3}$/.test(destination)||destination==='CGK')throw new Error('Bandara tujuan PTP tidak valid.');
