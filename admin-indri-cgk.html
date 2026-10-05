@@ -126,6 +126,26 @@
     <label>DP (%)<input name="dpPercent" type="number" min="0" max="100" step="1"></label>
     <label>Plafond kredit (Rp)<input name="creditLimit" type="number" min="0" step="1000"></label>
     <label>Termin kredit (hari)<input name="creditDays" type="number" min="0" max="365"></label>
+    <label>Credit warning (%)<input name="creditWarningPercent" type="number" min="1" max="99" value="80"></label>
+    <div class="wide subbox">
+      <h3>Personal Guarantee · khusus KREDIT</h3>
+      <p class="help">Owner/Pemegang Saham Pengendali wajib menjadi Personal Guarantor. Direktur Utama wajib menjadi PG kedua jika orangnya berbeda.</p>
+      <div class="grid">
+        <label>Nama Owner/Pengendali<input name="ownerName"></label>
+        <label>NIK Owner<input name="ownerNik" inputmode="numeric"></label>
+        <label>No. HP Owner<input name="ownerPhone"></label>
+        <label>Email Owner<input name="ownerEmail" type="email"></label>
+        <label class="wide">Alamat Owner<textarea name="ownerAddress"></textarea></label>
+        <label>Nama pasangan Owner (opsional)<input name="ownerSpouseName"></label>
+        <label>NIK pasangan (opsional)<input name="ownerSpouseNik" inputmode="numeric"></label>
+        <label class="toggle wide"><input name="directorSameAsOwner" type="checkbox"> Owner juga menjabat Direktur Utama</label>
+        <label>Nama Direktur Utama<input name="directorName"></label>
+        <label>NIK Direktur Utama<input name="directorNik" inputmode="numeric"></label>
+        <label>No. HP Direktur Utama<input name="directorPhone"></label>
+        <label>Email Direktur Utama<input name="directorEmail" type="email"></label>
+        <label class="wide">Alamat Direktur Utama<textarea name="directorAddress"></textarea></label>
+      </div>
+    </div>
     <label class="wide">Catatan<textarea name="notes"></textarea></label>
     <label class="toggle"><input name="active" type="checkbox" checked> Customer aktif</label>
   </div>
@@ -153,5 +173,5 @@
   <div class="actions"><button value="cancel" class="ghost">Batal</button><button type="submit" value="default" class="primary">Simpan Master</button></div><p id="master-status"></p>
 </form></dialog>
 
-<script src="/admin-indri-cgk.js?v=20261005-libra2"></script>
+<script src="/admin-indri-cgk.js?v=20261005-credit3"></script>
 </body></html>
