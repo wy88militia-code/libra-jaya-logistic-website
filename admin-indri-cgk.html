@@ -22,8 +22,9 @@
     <button class="tab active" data-panel="dashboard">Dashboard</button>
     <button class="tab" data-panel="customers">1 · Master & PKS</button>
     <button class="tab" data-panel="loa">2 · Buat LoA</button>
-    <button class="tab" data-panel="flow">3 · Operasional</button>
-    <button class="tab" data-panel="finance">4 · Invoice & Piutang</button>
+    <button class="tab" data-panel="stock">3 · Stock In Transit</button>
+    <button class="tab" data-panel="flow">4 · Operasional</button>
+    <button class="tab" data-panel="finance">5 · Invoice & Piutang</button>
     <button class="tab" data-panel="shipper">Master Pengirim</button>
     <button class="tab" data-panel="consignee">Master Konsinyi</button>
   </nav>
@@ -33,12 +34,14 @@
     <div class="kpis">
       <div><span>Pelanggan aktif</span><b id="kpi-customer">0</b></div>
       <div><span>Menunggu approval</span><b id="kpi-approval">0</b></div>
-      <div><span>Dalam proses</span><b id="kpi-process">0</b></div>
+      <div><span>Stock In Transit</span><b id="kpi-stock">0</b></div>
+      <div><span>Koli in transit</span><b id="kpi-stock-pieces">0</b></div>
+      <div><span>Berat in transit</span><b id="kpi-stock-kg">0 kg</b></div>
       <div><span>Invoice terbuka</span><b id="kpi-invoice">0</b></div>
       <div class="wide-kpi"><span>Total piutang</span><b id="kpi-ar">Rp 0</b></div>
     </div>
     <div class="flow-strip">
-      <span>Master PT + PKS</span><i>→</i><span>LoA</span><i>→</i><span>Disetujui</span><i>→</i><span>Terima Barang</span><i>→</i><span>Packing</span><i>→</i><span>Booking Airline</span><i>→</i><span>SMU</span><i>→</i><span>Invoice</span><i>→</i><span>Pelunasan</span>
+      <span>Master Data</span><i>→</i><span>PKS</span><i>→</i><span>LoA</span><i>→</i><span>Disetujui</span><i>→</i><span>Stock In Transit</span><i>→</i><span>Packing</span><i>→</i><span>Booking Airline</span><i>→</i><span>SMU</span><i>→</i><span>Departed</span><i>→</i><span>Arrived</span><i>→</i><span>Released</span>
     </div>
     <div id="dashboard-alerts" class="master-list"></div>
   </section>
@@ -75,9 +78,16 @@
     <section id="loa-result" class="result" hidden></section>
   </section>
 
+  <section class="panel workspace" data-workspace="stock">
+    <div class="section-head"><div><p class="eyebrow">CUSTODY CONTROL</p><h2>Stock In Transit</h2></div><button class="secondary" id="refresh-stock">Muat ulang</button></div>
+    <p class="help">Setiap barang yang sudah diterima melalui PTI masuk ke custody Libra sebagai Stock In Transit sampai status RELEASED.</p>
+    <div id="stock-summary" class="stock-summary"></div>
+    <div id="stock-list" class="master-list"></div>
+  </section>
+
   <section class="panel workspace" data-workspace="flow">
-    <div class="section-head"><div><p class="eyebrow">OPERATIONAL PIPELINE</p><h2>LoA → SMU → Invoice</h2></div><button class="secondary" id="refresh-flow">Muat ulang</button></div>
-    <div class="status-legend"><span>PENDING APPROVAL</span><span>APPROVED</span><span>RECEIVED</span><span>PACKED</span><span>AIRLINE BOOKED</span><span>SMU ISSUED</span><span>INVOICED</span></div>
+    <div class="section-head"><div><p class="eyebrow">OPERATIONAL PIPELINE</p><h2>LoA → Stock → Airline → Release</h2></div><button class="secondary" id="refresh-flow">Muat ulang</button></div>
+    <div class="status-legend"><span>PENDING APPROVAL</span><span>APPROVED</span><span>RECEIVED</span><span>PACKED</span><span>AIRLINE BOOKED</span><span>SMU ISSUED</span><span>DEPARTED</span><span>ARRIVED</span><span>RELEASED</span></div>
     <div id="flow-list" class="master-list"></div>
   </section>
 
@@ -143,5 +153,5 @@
   <div class="actions"><button value="cancel" class="ghost">Batal</button><button type="submit" value="default" class="primary">Simpan Master</button></div><p id="master-status"></p>
 </form></dialog>
 
-<script src="/admin-indri-cgk.js?v=20261005-libra1"></script>
+<script src="/admin-indri-cgk.js?v=20261005-libra2"></script>
 </body></html>
