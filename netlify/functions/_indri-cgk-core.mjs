@@ -19,6 +19,23 @@ export function assertIndriSession(request){
   if(!session){const e=new Error('Sesi Admin Indri / Soetta tidak valid.');e.status=401;throw e;}
   return session;
 }
+
+export function invoiceOutstanding(inv){
+  const paid=(inv?.payments||[]).reduce((s,p)=>s+num(p?.amount),0);
+  return Math.max(0,num(inv?.amount)-paid);
+}
+export function creditGateStatus(customer,invoices=[]){
+  if(!customer||customer.paymentScheme!=='CREDIT')return {active:true,status:'NOT_REQUIRED',reasons:[]};
+  const reasons=[];
+  const today=new Date().toISOString().slice(0,10);
+  if(customer.pksStatus!=='ACTIVE')reasons.push('PKS_NOT_ACTIVE');
+  if(customer.creditApprovalStatus!=='ACTIVE')reasons.push('CREDIT_APPROVAL_NOT_ACTIVE');
+  if(customer.ownerPgStatus!=='ACTIVE')reasons.push('OWNER_PG_NOT_ACTIVE');
+  if(!customer.directorSameAsOwner&&customer.directorPgStatus!=='ACTIVE')reasons.push('DIRECTOR_PG_NOT_ACTIVE');
+  if(invoices.some(x=>x.customerId===customer.id&&invoiceOutstanding(x)>0&&clean(x.dueDate,20)&&clean(x.dueDate,20)<today))reasons.push('OVERDUE_INVOICE');
+  return {active:reasons.length===0,status:reasons.length?'CREDIT_HOLD':'ACTIVE',reasons};
+}
+
 export async function listPrefix(prefix){
   const store=db(),{blobs}=await store.list({prefix});
   return (await Promise.all(blobs.map(x=>store.get(x.key,{type:'json',consistency:'strong'})))).filter(Boolean);
