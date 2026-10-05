@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {db,clean,num,json,assertIndriSession,actor,quotePtp} from './_indri-cgk-core.mjs';
+import {db,clean,num,json,assertIndriSession,actor,quotePtp,listPrefix,creditGateStatus} from './_indri-cgk-core.mjs';
 const customerKey=id=>`customer/${id}`,partyKey=(t,id)=>`party/${t}/${id}`,loaKey=id=>`loa/${id}`;
 const serial=()=>{const d=new Date();return `LOA/LJL/CGK/${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(Date.now()).slice(-7)}`;};
 function pub(x){return {id:x.id,loaNumber:x.loaNumber,createdAt:x.createdAt,status:x.status,customerId:x.customerId,customerName:x.customerName,customerPhone:x.customerPhone,pksNumber:x.pksNumber,paymentScheme:x.paymentScheme,dpPercent:x.dpPercent,creditLimitSnapshot:x.creditLimitSnapshot,creditDays:x.creditDays,originAirport:x.originAirport,destinationAirport:x.destinationAirport,shipper:x.shipper,consignee:x.consignee,contents:x.contents,pieces:x.pieces,actualWeight:x.actualWeight,estimatedChargeableWeight:x.estimatedChargeableWeight,airline:x.airline,ratePerKg:x.ratePerKg,total:x.total,validUntil:x.validUntil,pdfUrl:x.pdfUrl};}
@@ -16,6 +16,13 @@ export default async request=>{
   if(!customer||customer.active===false)return json({message:'Pilih Master PT Pengirim aktif.'},400);
   if(customer.pksStatus!=='ACTIVE')return json({message:'PKS customer harus ACTIVE sebelum LoA dibuat. Draft/Review/Ready for Privy belum dapat dipakai transaksi.'},409);
   if(customer.pksValidUntil&&customer.pksValidUntil<new Date().toISOString().slice(0,10))return json({message:'PKS customer sudah melewati masa berlaku.'},409);
+  if(customer.paymentScheme==='CREDIT'){
+    const invoices=await listPrefix('invoice/'),gate=creditGateStatus(customer,invoices);
+    if(!gate.active){
+      const labels={PKS_NOT_ACTIVE:'PKS belum ACTIVE',CREDIT_APPROVAL_NOT_ACTIVE:'Credit Approval belum ACTIVE',OWNER_PG_NOT_ACTIVE:'Personal Guarantee Owner belum ACTIVE',DIRECTOR_PG_NOT_ACTIVE:'Personal Guarantee Direktur Utama belum ACTIVE',OVERDUE_INVOICE:'terdapat invoice overdue'};
+      return json({message:'Fasilitas kredit sedang CREDIT HOLD: '+gate.reasons.map(x=>labels[x]||x).join(', ')+'. LoA kredit tidak dapat dibuat.',code:'CREDIT_HOLD',reasons:gate.reasons},409);
+    }
+  }
   const shipper=await db().get(partyKey('SHIPPER',clean(b.shipperId,80)),{type:'json',consistency:'strong'});
   const consignee=await db().get(partyKey('CONSIGNEE',clean(b.consigneeId,80)),{type:'json',consistency:'strong'});
   if(!shipper||shipper.active===false)return json({message:'Pilih Master Pengirim aktif.'},400);
