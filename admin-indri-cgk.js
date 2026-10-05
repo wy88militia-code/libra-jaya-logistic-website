@@ -3,7 +3,7 @@ const loaForm=$("#loa-form"),loaStatus=$("#loa-status"),loaResult=$("#loa-result
 const customerDialog=$("#customer-dialog"),customerForm=$("#customer-form"),customerStatus=$("#customer-status");
 const workflowDialog=$("#workflow-dialog"),workflowForm=$("#workflow-form"),workflowFields=$("#workflow-fields"),workflowStatus=$("#workflow-status");
 const masterDialog=$("#master-dialog"),masterForm=$("#master-form"),masterStatus=$("#master-status");
-let customers=[],shippers=[],consignees=[],routes=[],flow={loas:[],invoices:[],summary:{}};
+let customers=[],shippers=[],consignees=[],routes=[],flow={loas:[],invoices:[],summary:{}},currentSession={};
 
 const esc=v=>String(v??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
 const money=v=>"Rp "+Math.round(Number(v)||0).toLocaleString("id-ID");
@@ -21,6 +21,7 @@ async function api(url,options={}){
   try{
     const r=await fetch("/.netlify/functions/indri-cgk-session",{cache:"no-store"});
     if(!r.ok){window.location.replace("/jlx-soetta-login.html?next="+encodeURIComponent("/admin-indri-cgk"));return}
+    currentSession=await r.json().catch(()=>({}));
     await loadAll();
   }catch(e){alert(e.message||String(e))}
 })();
@@ -64,32 +65,70 @@ function renderAlerts(){
   box.innerHTML=items.join("");
 }
 
+function pgControl(x,type){
+  if(x.paymentScheme!=="CREDIT")return "";
+  if(type==="DIRECTOR"&&x.directorSameAsOwner)return '<span class="pill good">PG DIRUT: NOT REQUIRED</span>';
+  const field=type==="OWNER"?"ownerPgStatus":"directorPgStatus",docField=type==="OWNER"?"ownerPgDocument":"directorPgDocument";
+  const status=x[field]||"NOT_CREATED",doc=x[docField]||{},label=type==="OWNER"?"PG Owner":"PG Dirut";
+  const parts=[`<span class="pill ${status==="ACTIVE"?"good":"warn"}">${label}: ${esc(statusLabel(status))}</span>`];
+  if(doc.pdfUrl)parts.push(`<a class="button ghost" href="${esc(doc.pdfUrl)}" target="_blank" rel="noopener">PDF ${label}</a>`);
+  if(status==="NOT_CREATED")parts.push(`<button class="secondary pg-action" data-type="${type}" data-action="GENERATE" data-id="${esc(x.id)}">Buat ${label}</button>`);
+  if(status==="DRAFT")parts.push(`<button class="secondary pg-action" data-type="${type}" data-action="REGENERATE" data-id="${esc(x.id)}">Regenerate</button><button class="primary pg-action" data-type="${type}" data-action="SET_REVIEW" data-id="${esc(x.id)}">Review ${label}</button>`);
+  if(status==="REVIEW")parts.push(`<button class="primary pg-action" data-type="${type}" data-action="READY_FOR_PRIVY" data-id="${esc(x.id)}">Siap Privy</button>`);
+  return parts.join("");
+}
 function renderCustomers(){
   const byId=new Map((flow.customers||[]).map(x=>[x.id,x]));
   const box=$("#customer-list");
   if(!customers.length){box.innerHTML='<p class="preview">Belum ada Master PT Pengirim / PKS.</p>';return}
   box.innerHTML=customers.map(x=>{
-    const live=byId.get(x.id)||x,fin=live.finance||{};
+    const live=byId.get(x.id)||x,fin=live.finance||{},gate=live.creditGate||{active:x.paymentScheme!=="CREDIT",status:x.paymentScheme==="CREDIT"?"PENDING":"NOT REQUIRED",reasons:[]};
     const pksButtons=[
       '<button class="secondary edit-customer" data-id="'+esc(x.id)+'">Edit Master</button>',
       x.pksDraftId?'<a class="button ghost" href="'+esc(x.pksDraftPdfUrl||"#")+'" target="_blank" rel="noopener">Buka Draft PKS</a>':'<button class="primary pks-action" data-action="GENERATE" data-id="'+esc(x.id)+'">Buat Draft PKS</button>',
       x.pksDraftId&&x.pksStatus==="DRAFT"?'<button class="secondary pks-action" data-action="REGENERATE" data-id="'+esc(x.id)+'">Regenerate Draft</button>':"",
       x.pksStatus==="DRAFT"&&x.pksDraftId?'<button class="primary pks-action" data-action="SET_REVIEW" data-id="'+esc(x.id)+'">Masuk Review</button>':"",
       x.pksStatus==="REVIEW"?'<button class="primary pks-action" data-action="READY_FOR_PRIVY" data-id="'+esc(x.id)+'">Siap untuk Privy</button>':"",
-      x.pksStatus==="READY_FOR_PRIVY"?'<span class="paid-badge">READY FOR PRIVY</span>':""
+      x.pksStatus==="READY_FOR_PRIVY"?'<span class="paid-badge">PKS READY FOR PRIVY</span>':""
     ].join("");
+    const creditButtons=x.paymentScheme==="CREDIT"&&String(currentSession.role||"").toUpperCase()==="SUPERADMIN"?
+      (x.creditApprovalStatus==="ACTIVE"
+        ?`<button class="secondary credit-action" data-action="HOLD_CREDIT" data-id="${esc(x.id)}">Credit Hold Manual</button>`
+        :`<button class="primary credit-action" data-action="APPROVE_CREDIT" data-id="${esc(x.id)}">Approve Credit</button>`):"";
+    const guarantee=x.paymentScheme==="CREDIT"?`
+      <div class="credit-gate-box">
+        <p><b>Credit Gate:</b> <span class="pill ${gate.active?"good":"warn"}">${esc(statusLabel(gate.status))}</span> · Approval ${esc(statusLabel(x.creditApprovalStatus||"PENDING"))}</p>
+        <p class="meta">Owner: ${esc(x.ownerName||"-")} · ${esc(statusLabel(x.ownerPgStatus||"NOT_CREATED"))}${x.directorSameAsOwner?" · Owner = Dirut":` · Dirut: ${esc(x.directorName||"-")} · ${esc(statusLabel(x.directorPgStatus||"NOT_CREATED"))}`}</p>
+        ${gate.reasons?.length?`<p class="meta">Hold reason: ${gate.reasons.map(statusLabel).join(" · ")}</p>`:""}
+      </div>`:"";
     return `<article class="master-card ${x.active===false?"inactive":""}">
       <div><h3>${esc(x.legalName)}</h3>
       <p><b>${esc(x.customerCode||"-")}</b>${x.tradeName?" · "+esc(x.tradeName):""} · PIC ${esc(x.pic||"-")}</p>
       <p>PKS <b>${esc(x.pksNumber||"-")}</b> · <span class="pill ${x.pksStatus==="ACTIVE"?"good":"warn"}">${esc(x.pksStatus)}</span> · ${esc(x.paymentScheme)}</p>
-      <p>${x.paymentScheme==="DP"?`DP ${Number(x.dpPercent)||0}%`:x.paymentScheme==="CREDIT"?`Plafond ${money(x.creditLimit)} · termin ${Number(x.creditDays)||0} hari`:"Cash"}</p>
-      <p class="meta">Penandatangan: ${esc(x.signatoryName||x.pic||"-")} · ${esc(x.signatoryTitle||"belum ditentukan")} · Draft V${Number(x.pksDraftVersion)||0}</p>
-      <p class="meta">Piutang: <b>${money(fin.outstanding||0)}</b> · Komitmen belum invoice: ${money(fin.committed||0)}${x.paymentScheme==="CREDIT"?` · Sisa plafond: <b>${money(fin.availableCredit||0)}</b>`:""}</p></div>
-      <div class="card-actions">${pksButtons}</div>
+      <p>${x.paymentScheme==="DP"?`DP ${Number(x.dpPercent)||0}%`:x.paymentScheme==="CREDIT"?`Plafond ${money(x.creditLimit)} · termin ${Number(x.creditDays)||0} hari · warning ${Number(x.creditWarningPercent)||80}%`:"Cash"}</p>
+      <p class="meta">Penandatangan PKS: ${esc(x.signatoryName||x.pic||"-")} · ${esc(x.signatoryTitle||"belum ditentukan")} · Draft V${Number(x.pksDraftVersion)||0}</p>
+      <p class="meta">Piutang: <b>${money(fin.outstanding||0)}</b> · Komitmen belum invoice: ${money(fin.committed||0)}${x.paymentScheme==="CREDIT"?` · Sisa plafond: <b>${money(fin.availableCredit||0)}</b>`:""}</p>
+      ${guarantee}</div>
+      <div class="card-actions">${pksButtons}${pgControl(x,"OWNER")}${pgControl(x,"DIRECTOR")}${creditButtons}</div>
     </article>`;
   }).join("");
   $$(".edit-customer").forEach(b=>b.addEventListener("click",()=>openCustomer(b.dataset.id)));
   $$(".pks-action").forEach(b=>b.addEventListener("click",()=>pksAction(b.dataset.action,b.dataset.id)));
+  $$(".pg-action").forEach(b=>b.addEventListener("click",()=>pgAction(b.dataset.action,b.dataset.id,b.dataset.type)));
+  $$(".credit-action").forEach(b=>b.addEventListener("click",()=>creditAction(b.dataset.action,b.dataset.id)));
+}
+async function pgAction(action,customerId,type){
+  try{
+    const d=await api("/.netlify/functions/indri-cgk-pg",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify({action,customerId,type})});
+    await loadAll();
+    if(d.item?.pdfUrl&&(action==="GENERATE"||action==="REGENERATE"))window.open(d.item.pdfUrl,"_blank","noopener");
+  }catch(err){alert("Gagal memproses Personal Guarantee: "+(err.message||String(err)))}
+}
+async function creditAction(action,customerId){
+  const payload={action,customerId};
+  if(action==="HOLD_CREDIT")payload.reason=prompt("Alasan Credit Hold:","Manual hold oleh Super Admin.")||"Manual hold oleh Super Admin.";
+  try{await api("/.netlify/functions/indri-cgk-credit",{method:"POST",headers:{"content-type":"application/json"},body:JSON.stringify(payload)});await loadAll()}
+  catch(err){alert("Gagal memproses Credit Approval: "+(err.message||String(err)))}
 }
 async function pksAction(action,customerId){
   const label={GENERATE:"membuat draft PKS",REGENERATE:"membuat ulang draft PKS",SET_REVIEW:"memindahkan PKS ke REVIEW",READY_FOR_PRIVY:"menandai PKS READY_FOR_PRIVY"}[action]||"memproses PKS";
@@ -104,15 +143,16 @@ function openCustomer(id){
   customerForm.reset();customerStatus.textContent="";customerForm.elements.id.value=id;customerForm.elements.active.checked=true;
   const x=customers.find(v=>v.id===id);$("#customer-title").textContent=x?"Edit PT & PKS":"Tambah PT & PKS";
   if(x){
-    ["customerCode","legalName","tradeName","nib","npwp","pic","phone","email","signatoryName","signatoryTitle","address","pksNumber","pksDate","pksValidUntil","pksStatus","paymentScheme","dpPercent","creditLimit","creditDays","notes"].forEach(k=>customerForm.elements[k].value=x[k]??"");
+    ["customerCode","legalName","tradeName","nib","npwp","pic","phone","email","signatoryName","signatoryTitle","address","pksNumber","pksDate","pksValidUntil","pksStatus","paymentScheme","dpPercent","creditLimit","creditDays","creditWarningPercent","ownerName","ownerNik","ownerPhone","ownerEmail","ownerAddress","ownerSpouseName","ownerSpouseNik","directorName","directorNik","directorPhone","directorEmail","directorAddress","notes"].forEach(k=>customerForm.elements[k].value=x[k]??"");
     customerForm.elements.active.checked=x.active!==false;
-  } else {customerForm.elements.pksStatus.value="DRAFT";customerForm.elements.paymentScheme.value="CASH";}
+    customerForm.elements.directorSameAsOwner.checked=Boolean(x.directorSameAsOwner);
+  } else {customerForm.elements.pksStatus.value="DRAFT";customerForm.elements.paymentScheme.value="CASH";customerForm.elements.creditWarningPercent.value=80;}
   customerDialog.showModal();
 }
 customerForm.addEventListener("submit",async e=>{
   e.preventDefault();if(e.submitter?.value==="cancel"){customerDialog.close();return}
-  const b=Object.fromEntries(new FormData(customerForm));b.active=customerForm.elements.active.checked;
-  b.dpPercent=Number(b.dpPercent)||0;b.creditLimit=Number(b.creditLimit)||0;b.creditDays=Number(b.creditDays)||0;
+  const b=Object.fromEntries(new FormData(customerForm));b.active=customerForm.elements.active.checked;b.directorSameAsOwner=customerForm.elements.directorSameAsOwner.checked;
+  b.dpPercent=Number(b.dpPercent)||0;b.creditLimit=Number(b.creditLimit)||0;b.creditDays=Number(b.creditDays)||0;b.creditWarningPercent=Number(b.creditWarningPercent)||80;
   customerStatus.textContent="Menyimpan…";
   try{
     await api("/.netlify/functions/indri-cgk-customers",{method:b.id?"PUT":"POST",headers:{"content-type":"application/json"},body:JSON.stringify(b)});
@@ -146,7 +186,8 @@ masterForm.addEventListener("submit",async e=>{
 });
 
 function renderSelects(){
-  const cs=customers.filter(x=>x.active!==false&&x.pksStatus==="ACTIVE");
+  const liveById=new Map((flow.customers||[]).map(x=>[x.id,x]));
+  const cs=customers.filter(x=>x.active!==false&&x.pksStatus==="ACTIVE"&&(x.paymentScheme!=="CREDIT"||liveById.get(x.id)?.creditGate?.active));
   loaForm.elements.customerId.innerHTML='<option value="">Pilih customer</option>'+cs.map(x=>`<option value="${esc(x.id)}">${esc(x.customerCode||"-")} · ${esc(x.legalName)} · ${esc(x.paymentScheme)}</option>`).join("");
   loaForm.elements.shipperId.innerHTML='<option value="">Pilih pengirim</option>'+shippers.filter(x=>x.active!==false).map(x=>`<option value="${esc(x.id)}">${esc(x.code||"-")} · ${esc(x.name)}</option>`).join("");
   loaForm.elements.consigneeId.innerHTML='<option value="">Pilih konsinyi</option>'+consignees.filter(x=>x.active!==false).map(x=>`<option value="${esc(x.id)}">${esc(x.code||"-")} · ${esc(x.name)}${x.city?" · "+esc(x.city):""}</option>`).join("");
@@ -157,7 +198,8 @@ function renderRoutes(){
 loaForm.elements.customerId.addEventListener("change",()=>{
   const x=customers.find(v=>v.id===loaForm.elements.customerId.value),box=$("#customer-preview");
   if(!x){box.textContent="Pilih PT Pengirim / Customer untuk melihat PKS dan skema pembayaran.";return}
-  box.innerHTML=`<b>${esc(x.legalName)}</b> · PKS ${esc(x.pksNumber||"-")} · <b>${esc(x.paymentScheme)}</b>${x.paymentScheme==="DP"?` · DP ${Number(x.dpPercent)||0}%`:""}${x.paymentScheme==="CREDIT"?` · Plafond ${money(x.creditLimit)} · ${Number(x.creditDays)||0} hari`:""}`;
+  const live=(flow.customers||[]).find(v=>v.id===x.id);
+  box.innerHTML=`<b>${esc(x.legalName)}</b> · PKS ${esc(x.pksNumber||"-")} · <b>${esc(x.paymentScheme)}</b>${x.paymentScheme==="DP"?` · DP ${Number(x.dpPercent)||0}%`:""}${x.paymentScheme==="CREDIT"?` · Plafond ${money(x.creditLimit)} · ${Number(x.creditDays)||0} hari · Credit ${esc(statusLabel(live?.creditGate?.status||"PENDING"))}`:""}`;
 });
 loaForm.elements.shipperId.addEventListener("change",()=>previewParty("SHIPPER"));
 loaForm.elements.consigneeId.addEventListener("change",()=>previewParty("CONSIGNEE"));
