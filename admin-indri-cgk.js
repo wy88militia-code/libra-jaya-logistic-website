@@ -59,9 +59,11 @@ function renderAlerts(){
   const box=$("#dashboard-alerts"),items=[];
   const expired=customers.filter(x=>x.active!==false&&x.pksStatus!=="ACTIVE");
   if(expired.length)items.push(`<article class="alert-card warn"><b>${expired.length} customer belum memiliki PKS ACTIVE.</b><span>LoA baru untuk customer tersebut akan diblok.</span></article>`);
-  const over=customers.filter(x=>x.paymentScheme==="CREDIT"&&Number(x.finance?.availableCredit||0)<=0);
+  const over=(flow.customers||[]).filter(x=>x.paymentScheme==="CREDIT"&&Number(x.finance?.availableCredit||0)<=0);
   if(over.length)items.push(`<article class="alert-card danger"><b>${over.length} customer kredit tanpa sisa plafond.</b><span>Approval LoA kredit baru akan ditolak sampai saldo tersedia.</span></article>`);
-  if(!items.length)items.push('<article class="alert-card ok"><b>Kontrol utama normal.</b><span>Tidak ada warning PKS/plafond dari data saat ini.</span></article>');
+  const held=(flow.customers||[]).filter(x=>x.paymentScheme==="CREDIT"&&!x.creditGate?.active);
+  if(held.length)items.push(`<article class="alert-card danger"><b>${held.length} customer dalam CREDIT HOLD.</b><span>PKS, Credit Approval, Personal Guarantee, overdue, dan plafond diperiksa sebelum kredit dapat dipakai.</span></article>`);
+  if(!items.length)items.push('<article class="alert-card ok"><b>Kontrol utama normal.</b><span>Tidak ada warning PKS, Personal Guarantee, overdue, atau plafond.</span></article>');
   box.innerHTML=items.join("");
 }
 
