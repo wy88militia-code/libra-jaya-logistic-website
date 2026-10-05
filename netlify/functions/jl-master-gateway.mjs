@@ -7,7 +7,8 @@ const RANGES={
   airline:"'JL_AIRLINE'!A1:J200",
   rate:"'JL_RATE'!A1:N3000",
   packing:"'JL_PACKING'!A1:L500",
-  agent:"'JL_AGENT'!A1:L1000",
+  agent:"'JL_AGENT'!A1:Q1000",
+  creditPartner:"'JL_CREDIT_PARTNER'!A1:N1000",
   surcharge:"'JL_SURCHARGE'!A1:H1000",
   vendorMaster:"'VENDOR_MASTER'!A1:H1000",
   vendorRate:"'VENDOR_RATE'!A1:Q5000",
@@ -15,7 +16,7 @@ const RANGES={
   lastMileConfirmed:"'Rute Terkonfirmasi'!A1:AO1000",
   lastMileModal:"'Modal Rute Pilot'!A1:AO200",
 };
-const WRITE_ALLOWED=new Set([RANGES.config,"'JL_AGENT'!A1:G1000",RANGES.packing]);
+const WRITE_ALLOWED=new Set([RANGES.config,RANGES.agent,RANGES.creditPartner,RANGES.packing,RANGES.vendorRate,RANGES.vendorPrice]);
 const clean=v=>String(v??'').trim();
 const b64=v=>Buffer.from(typeof v==='string'?v:JSON.stringify(v)).toString('base64url');
 const privateKey=()=>String(process.env.GOOGLE_SERVICE_ACCOUNT_PRIVATE_KEY||'').replace(/\\n/g,'\n').trim();
