@@ -61,3 +61,18 @@
   for = "/admin-courier*"
   [headers.values]
     Permissions-Policy = "camera=(self), microphone=(), geolocation=(self)"
+
+
+# Admin Indri CGK PTP Tools
+[[redirects]]
+  from = "/admin-indri-cgk"
+  to = "/admin-indri-cgk.html"
+  status = 200
+
+[[headers]]
+  for = "/admin-indri-cgk*"
+  [headers.values]
+    Cache-Control = "no-store, max-age=0"
+    Pragma = "no-cache"
+    X-Robots-Tag = "noindex, nofollow"
+
