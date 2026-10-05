@@ -5,6 +5,8 @@ export function normalizeAdminRole(value){return ROLE_ALIASES[String(value||'').
 const PATH_ROLES=[
  [/^\/(?:libra-admin|admin-tool)$/,ADMIN_ROLES],
  [/^\/jlx-soetta(?:\/(?:booking|marketplace|pti|pricing|invoice))?$/,['SUPERADMIN','OPS']],
+ [/^\/admin-indri-cgk$/,['SUPERADMIN','OPS']],
+ [/^\/indri-cgk(?:-[a-z0-9-]+)?$/,['SUPERADMIN','OPS']],
  [/^\/courier(?:\/(?:assignments|simulation|lastmile-djj))?$/,['SUPERADMIN','OPS','COURIER']],
  [/^\/admin-system-health$/,['SUPERADMIN']],
  [/^\/admin-partners$/,['SUPERADMIN','FINANCE']],
