@@ -43,12 +43,14 @@ async function loadAll(){
   renderAll();
 }
 function renderAll(){
-  renderKpis();renderCustomers();renderParties();renderSelects();renderRoutes();renderFlow();renderFinance();renderAlerts();renderPackageRows();
+  renderKpis();renderCustomers();renderParties();renderSelects();renderRoutes();renderStock();renderFlow();renderFinance();renderAlerts();renderPackageRows();
 }
 function renderKpis(){
   $("#kpi-customer").textContent=flow.summary?.customerCount||0;
   $("#kpi-approval").textContent=flow.summary?.pendingApproval||0;
-  $("#kpi-process").textContent=flow.summary?.inProcess||0;
+  $("#kpi-stock").textContent=flow.summary?.stock?.activeShipments||0;
+  $("#kpi-stock-pieces").textContent=flow.summary?.stock?.pieces||0;
+  $("#kpi-stock-kg").textContent=(Number(flow.summary?.stock?.weightKg)||0).toLocaleString("id-ID",{maximumFractionDigits:2})+" kg";
   $("#kpi-invoice").textContent=flow.summary?.unpaidInvoice||0;
   $("#kpi-ar").textContent=money(flow.summary?.totalReceivable||0);
 }
@@ -182,19 +184,46 @@ loaForm.addEventListener("submit",async e=>{
   }catch(err){loaStatus.textContent=err.message||String(err)}finally{$("#issue-loa").disabled=false}
 });
 
-const nextAction={PENDING_APPROVAL:["APPROVE_LOA","Setujui LoA"],ISSUED:["APPROVE_LOA","Setujui LoA"],APPROVED:["RECEIVE_GOODS","Terima Barang / PTI"],RECEIVED:["PACK_COMPLETE","Selesai Packing"],PACKED:["AIRLINE_BOOK","Booking Airline"],AIRLINE_BOOKED:["ISSUE_SMU","Terbitkan SMU"],SMU_ISSUED:["ISSUE_INVOICE","Terbitkan Invoice"]};
+function renderStock(){
+  const rows=flow.stocks||[],box=$("#stock-list"),summary=$("#stock-summary"),s=flow.summary?.stock||{};
+  summary.innerHTML=`<div><span>Shipment aktif</span><b>${Number(s.activeShipments)||0}</b></div><div><span>Koli</span><b>${Number(s.pieces)||0}</b></div><div><span>Berat</span><b>${(Number(s.weightKg)||0).toLocaleString("id-ID",{maximumFractionDigits:2})} kg</b></div><div><span>Masih di CGK</span><b>${Number(s.atCgk)||0}</b></div><div><span>Departed</span><b>${Number(s.departed)||0}</b></div><div><span>Arrived</span><b>${Number(s.arrived)||0}</b></div>`;
+  if(!rows.length){box.innerHTML='<p class="preview">Belum ada Stock In Transit.</p>';return}
+  box.innerHTML=rows.map(x=>`<article class="stock-card ${["RELEASED","CLOSED"].includes(String(x.status||"").toUpperCase())?"closed":""}">
+    <div class="stock-head"><div><span class="stage">${esc(statusLabel(x.status))}</span><h3>${esc(x.stockId||"-")}</h3><p>${esc(x.customerName||"-")} · ${esc(x.originAirport||"CGK")} → ${esc(x.destinationAirport||"-")}</p></div><div class="stock-custody">${esc(x.custodyStatus||"-")}</div></div>
+    <div class="stock-grid">
+      <div><span>PTI</span><b>${esc(x.ptiNumber||"-")}</b></div>
+      <div><span>Koli</span><b>${Number(x.pieces)||0}</b></div>
+      <div><span>Berat</span><b>${(Number(x.currentWeightKg||x.receivedWeightKg)||0).toLocaleString("id-ID",{maximumFractionDigits:2})} kg</b></div>
+      <div><span>Lokasi</span><b>${esc(x.currentLocation||"-")}</b></div>
+      <div><span>SMU</span><b>${esc(x.smuNumber||"-")}</b></div>
+      <div><span>Flight</span><b>${esc(x.flightNumber||"-")}</b></div>
+    </div>
+    <p class="meta">${esc(x.contents||"-")} · Update ${date(x.updatedAt||x.createdAt)}</p>
+  </article>`).join("");
+}
+const nextAction={
+  PENDING_APPROVAL:["APPROVE_LOA","Setujui LoA"],
+  ISSUED:["APPROVE_LOA","Setujui LoA"],
+  APPROVED:["RECEIVE_GOODS","Terima Barang / Stock In Transit"],
+  RECEIVED:["PACK_COMPLETE","Selesai Packing"],
+  PACKED:["AIRLINE_BOOK","Booking Airline"],
+  AIRLINE_BOOKED:["ISSUE_SMU","Terbitkan SMU"],
+  SMU_ISSUED:["MARK_DEPARTED","Tandai Departed"],
+  DEPARTED:["MARK_ARRIVED","Tandai Arrived"],
+  ARRIVED:["RELEASE_GOODS","Release Barang"]
+};
 function renderFlow(){
   const box=$("#flow-list"),rows=flow.loas||[];
   if(!rows.length){box.innerHTML='<p class="preview">Belum ada transaksi LoA.</p>';return}
   box.innerHTML=rows.map(x=>{
     const n=nextAction[x.status];
-    return `<article class="flow-card"><div class="flow-main"><div><span class="stage">${esc(statusLabel(x.status))}</span><h3>${esc(x.loaNumber)}</h3><p><b>${esc(x.customerName||"-")}</b> · ${esc(x.paymentScheme||"-")} · CGK → ${esc(x.destinationAirport)}</p><p>${esc(x.contents||"-")} · ${Number(x.pieces)||0} koli · ${Number(x.estimatedChargeableWeight)||0} kg · <b>${money(x.total)}</b></p></div><div class="card-actions"><a class="button ghost" href="${esc(x.pdfUrl||"#")}" target="_blank" rel="noopener">LoA PDF</a>${n?`<button class="primary workflow-next" data-id="${esc(x.id)}" data-action="${n[0]}">${n[1]}</button>`:""}</div></div><div class="timeline">${timeline(x.status)}</div></article>`;
+    return `<article class="flow-card"><div class="flow-main"><div><span class="stage">${esc(statusLabel(x.status))}</span><h3>${esc(x.loaNumber)}</h3><p><b>${esc(x.customerName||"-")}</b> · ${esc(x.paymentScheme||"-")} · CGK → ${esc(x.destinationAirport)}</p><p>${esc(x.contents||"-")} · ${Number(x.pieces)||0} koli · ${Number(x.estimatedChargeableWeight)||0} kg · <b>${money(x.total)}</b></p>${x.stock?`<p class="meta">Stock: <b>${esc(x.stock.stockId||"-")}</b> · ${esc(statusLabel(x.stock.status))} · ${esc(x.stock.currentLocation||"-")}</p>`:""}</div><div class="card-actions"><a class="button ghost" href="${esc(x.pdfUrl||"#")}" target="_blank" rel="noopener">LoA PDF</a>${n?`<button class="primary workflow-next" data-id="${esc(x.id)}" data-action="${n[0]}">${n[1]}</button>`:""}${!x.invoiceId&&["SMU_ISSUED","DEPARTED","ARRIVED","RELEASED"].includes(x.status)?`<button class="secondary workflow-next" data-id="${esc(x.id)}" data-action="ISSUE_INVOICE">Terbitkan Invoice</button>`:""}</div></div><div class="timeline">${timeline(x.status)}</div></article>`;
   }).join("");
   $$(".workflow-next").forEach(b=>b.addEventListener("click",()=>openWorkflow(b.dataset.action,b.dataset.id,"")));
 }
 function timeline(status){
-  const steps=[["APPROVED","Approve"],["RECEIVED","Terima"],["PACKED","Packing"],["AIRLINE_BOOKED","Booking"],["SMU_ISSUED","SMU"],["INVOICED","Invoice"],["PAID","Lunas"]];
-  const rank={PENDING_APPROVAL:0,ISSUED:0,APPROVED:1,RECEIVED:2,PACKED:3,AIRLINE_BOOKED:4,SMU_ISSUED:5,INVOICED:6,PAID:7}[status]||0;
+  const steps=[["APPROVED","Approve"],["RECEIVED","Stock In"],["PACKED","Packing"],["AIRLINE_BOOKED","Booking"],["SMU_ISSUED","SMU"],["DEPARTED","Departed"],["ARRIVED","Arrived"],["RELEASED","Released"]];
+  const rank={PENDING_APPROVAL:0,ISSUED:0,APPROVED:1,RECEIVED:2,PACKED:3,AIRLINE_BOOKED:4,SMU_ISSUED:5,DEPARTED:6,ARRIVED:7,RELEASED:8}[status]||0;
   return steps.map((s,i)=>`<span class="${rank>=i+1?"done":""}">${s[1]}</span>`).join("");
 }
 function field(label,name,type="text",value="",extra=""){return `<label>${label}<input name="${name}" type="${type}" value="${esc(value)}" ${extra}></label>`}
@@ -204,10 +233,13 @@ function openWorkflow(action,loaId,invoiceId){
   const x=(flow.loas||[]).find(v=>v.id===loaId),inv=(flow.invoices||[]).find(v=>v.id===invoiceId);
   let title="",fields="";
   if(action==="APPROVE_LOA"){title="Approval LoA";fields=field("Disetujui oleh *","approvedBy","text","Customer","required")+field("Tanggal persetujuan","approvedAt","datetime-local")+field("Referensi approval","approvalRef","text","")+textarea("Catatan","notes")}
-  if(action==="RECEIVE_GOODS"){title="Terima Barang / PTI";fields=field("Diterima oleh","receivedBy","text","Indri")+field("Waktu terima","receivedAt","datetime-local")+field("Jumlah koli","pieces","number",x?.pieces||1,'min="1" required')+field("Berat aktual (kg)","actualWeight","number",x?.actualWeight||"", 'min=".01" step=".01" required')+field("Kondisi barang","condition","text","Baik")+textarea("Catatan penerimaan","notes")}
+  if(action==="RECEIVE_GOODS"){title="Terima Barang → Stock In Transit";fields=field("Diterima oleh","receivedBy","text","Indri")+field("Waktu terima","receivedAt","datetime-local")+field("Jumlah koli","pieces","number",x?.pieces||1,'min="1" required')+field("Berat aktual (kg)","actualWeight","number",x?.actualWeight||"", 'min=".01" step=".01" required')+field("Kondisi barang","condition","text","Baik")+field("Lokasi gudang","warehouseLocation","text","Gudang CGK / Soetta")+field("Rak / area stok","rackLocation","text","")+textarea("Catatan penerimaan","notes")}
   if(action==="PACK_COMPLETE"){title="Packing Selesai";fields=field("Packing oleh","packedBy","text","Indri")+field("Waktu selesai","packedAt","datetime-local")+field("Jumlah koli akhir","pieces","number",x?.receipt?.pieces||x?.pieces||1,'min="1"')+field("Berat aktual akhir (kg)","actualWeight","number",x?.receipt?.actualWeight||x?.actualWeight||"", 'min=".01" step=".01"')+field("Berat volume (kg)","volumeWeight","number","",'min="0" step=".01"')+field("Jenis packing","packingType","text","STANDARD")+textarea("Catatan packing","notes")}
   if(action==="AIRLINE_BOOK"){title="Booking Airline";fields=field("Airline","airline","text",x?.airline||"", "required")+field("Kode booking *","bookingCode","text","", "required")+field("Flight number","flightNumber","text","")+field("Tanggal flight","flightDate","date","")+field("Berat booking (kg)","bookedWeight","number",x?.packing?.actualWeight||x?.estimatedChargeableWeight||"", 'min=".01" step=".01"')+textarea("Catatan booking","notes")}
   if(action==="ISSUE_SMU"){title="Terbitkan SMU";fields=field("Nomor SMU *","smuNumber","text","", "required")+field("Waktu terbit","issuedAt","datetime-local")+field("Flight number","flightNumber","text",x?.airlineBooking?.flightNumber||"")+field("Chargeable weight (kg)","chargeableWeight","number",x?.airlineBooking?.bookedWeight||x?.estimatedChargeableWeight||"", 'min=".01" step=".01"')+field("Biaya airline / HPP (Rp)","airlineCost","number","",'min="0" step="1000"')+textarea("Catatan SMU","notes")}
+  if(action==="MARK_DEPARTED"){title="Tandai Shipment Departed";fields=field("Waktu berangkat","departedAt","datetime-local")+field("Flight number","flightNumber","text",x?.smu?.flightNumber||x?.airlineBooking?.flightNumber||"")+field("Airline","airline","text",x?.airlineBooking?.airline||x?.airline||"")+textarea("Catatan keberangkatan","notes")}
+  if(action==="MARK_ARRIVED"){title="Tandai Shipment Arrived";fields=field("Waktu tiba","arrivedAt","datetime-local")+field("Diterima oleh / petugas tujuan","receivedBy","text","")+field("Referensi arrival","arrivalReference","text","")+textarea("Catatan arrival","notes")}
+  if(action==="RELEASE_GOODS"){title="Release / Serah Terima Barang";fields=field("Waktu release","releasedAt","datetime-local")+field("Diserahkan kepada *","releasedTo","text","", "required")+field("No. identitas / referensi penerima","recipientIdRef","text","")+field("Referensi POD","podReference","text","")+field("Petugas release","releasedBy","text","")+textarea("Catatan release","notes")}
   if(action==="ISSUE_INVOICE"){title="Terbitkan Invoice";fields=field("Tanggal invoice","invoiceDate","date",new Date().toISOString().slice(0,10))+field("Jatuh tempo (opsional)","dueDate","date","")+field("Nilai invoice (Rp)","amount","number",x?.total||0,'min="1" step="1000" required')+textarea("Catatan invoice","notes")}
   if(action==="RECORD_PAYMENT"){title="Catat Pembayaran";fields=field("Nominal pembayaran (Rp)","amount","number",inv?.outstanding||0,'min="1" step="1000" required')+field("Tanggal / waktu bayar","paidAt","datetime-local")+field("Metode","method","text","TRANSFER")+field("Referensi transfer","reference","text","")+textarea("Catatan","notes")}
   $("#workflow-title").textContent=title;workflowFields.innerHTML=fields;workflowDialog.showModal();
@@ -230,4 +262,4 @@ function renderFinance(){
   box.innerHTML=rows.map(x=>`<article class="master-card"><div><h3>${esc(x.invoiceNumber)}</h3><p><b>${esc(x.customerName)}</b> · ${esc(x.paymentScheme)} · LoA ${esc(x.loaNumber)}</p><p>Invoice ${money(x.amount)} · Terbayar ${money(x.paidTotal)} · <b>Sisa ${money(x.outstanding)}</b></p><p class="meta">Tanggal ${esc(x.invoiceDate)} · jatuh tempo ${esc(x.dueDate)} · ${esc(x.status)}</p></div><div class="card-actions">${x.outstanding>0?`<button class="primary pay-invoice" data-id="${esc(x.id)}">Catat Pembayaran</button>`:'<span class="paid-badge">LUNAS</span>'}</div></article>`).join("");
   $$(".pay-invoice").forEach(b=>b.addEventListener("click",()=>openWorkflow("RECORD_PAYMENT","",b.dataset.id)));
 }
-["#refresh-all","#refresh-flow","#refresh-finance"].forEach(s=>$(s).addEventListener("click",()=>loadAll().catch(e=>alert(e.message||String(e)))));
+["#refresh-all","#refresh-stock","#refresh-flow","#refresh-finance"].forEach(s=>$(s).addEventListener("click",()=>loadAll().catch(e=>alert(e.message||String(e)))));
