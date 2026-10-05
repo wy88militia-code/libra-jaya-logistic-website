@@ -1,0 +1,52 @@
+import crypto from 'node:crypto';
+import {db,clean,num,json,assertIndriSession,actor} from './_indri-cgk-core.mjs';
+const customerKey=id=>`customer/${id}`,pksKey=id=>`pks/${id}`;
+function number(){const d=new Date();return `PKS/LJL-CGK/${d.getUTCFullYear()}${String(d.getUTCMonth()+1).padStart(2,'0')}/${String(Date.now()).slice(-7)}`;}
+function paymentText(c){
+  if(c.paymentScheme==='DP')return `DP sebesar ${num(c.dpPercent)}% dari nilai LoA dibayar sebelum pelaksanaan transaksi; sisa pembayaran mengikuti invoice final.`;
+  if(c.paymentScheme==='CREDIT')return `KREDIT dengan plafond maksimum Rp ${Math.round(num(c.creditLimit)).toLocaleString('id-ID')} dan termin ${Math.floor(num(c.creditDays))} hari kalender sejak tanggal invoice. Outstanding invoice dan komitmen LoA yang telah disetujui diperhitungkan terhadap plafond.`;
+  return 'CASH: pembayaran dilakukan sesuai invoice transaksi tanpa fasilitas plafond kredit.';
+}
+function clauses(c){return [
+ {title:'PASAL 1 - RUANG LINGKUP',body:['PIHAK PERTAMA menyediakan layanan pengiriman kargo udara Port to Port (PTP) melalui Hub CGK untuk PIHAK KEDUA sesuai rute yang tersedia pada master layanan JL Express.','Layanan tambahan seperti pickup, last-mile, special handling, packing khusus, karantina, dangerous goods atau layanan lain hanya berlaku bila dicantumkan pada LoA atau dokumen transaksi terkait.']},
+ {title:'PASAL 2 - LETTER OF ACCEPTANCE (LoA)',body:['Setiap pengiriman didahului LoA yang memuat rute, barang, jumlah koli, berat/dimensi, estimasi tarif, asuransi, packing dan ketentuan khusus transaksi.','LoA menjadi dasar pelaksanaan setelah disetujui PIHAK KEDUA atau wakil yang berwenang. Perubahan material setelah persetujuan wajib dicatat dan disetujui kembali.']},
+ {title:'PASAL 3 - TARIF, BERAT TAGIHAN DAN PAJAK',body:['Tarif menggunakan harga aktif yang berlaku pada saat LoA diterbitkan, kecuali disepakati lain secara tertulis.','Berat tagihan mengikuti berat aktual atau berat volume/chargeable weight sesuai ketentuan layanan/airline dan hasil timbang final.','Pajak dan pungutan resmi mengikuti ketentuan yang berlaku pada saat transaksi.']},
+ {title:'PASAL 4 - SKEMA PEMBAYARAN',body:[paymentText(c),'Untuk skema KREDIT, PIHAK PERTAMA berhak menahan LoA baru apabila exposure telah mencapai atau melampaui plafond.','Perubahan skema, persentase DP, plafond atau termin hanya berlaku setelah disetujui dan dicatat pada master PKS/addendum.']},
+ {title:'PASAL 5 - PENERIMAAN BARANG DAN PACKING',body:['Penerimaan barang dicatat melalui Surat Terima Barang/PTI dengan jumlah koli, berat awal, kondisi dan catatan penerimaan.','PIHAK PERTAMA berhak menimbang/mengukur ulang dan meminta repacking apabila kemasan tidak memenuhi ketentuan keselamatan atau airline.']},
+ {title:'PASAL 6 - BOOKING AIRLINE DAN SMU',body:['Booking airline dilakukan setelah tahapan operasional yang diwajibkan terpenuhi. Jadwal dan space mengikuti konfirmasi airline.','Nomor booking, flight dan SMU dicatat sebagai referensi operasional transaksi. Perubahan jadwal akibat keputusan airline, cuaca, bandara atau keadaan di luar kendali wajar akan dikomunikasikan kepada PIHAK KEDUA.']},
+ {title:'PASAL 7 - INVOICE DAN PEMBAYARAN',body:['Invoice diterbitkan setelah data operasional final tersedia, termasuk SMU dan berat tagihan bila relevan.','Pembayaran dianggap diterima setelah dana efektif masuk ke rekening yang ditunjuk PIHAK PERTAMA dan tercatat pada sistem.','Saldo piutang pelanggan berkurang sebesar pembayaran yang telah diverifikasi.']},
+ {title:'PASAL 8 - KEWAJIBAN PIHAK KEDUA ATAS BARANG',body:['PIHAK KEDUA wajib memberikan keterangan barang yang benar dan lengkap, termasuk sifat barang, nilai, kandungan baterai/cairan/bahan berbahaya, kebutuhan suhu serta dokumen karantina/izin bila diperlukan.','Barang terlarang, dangerous goods, senjata, amunisi, bahan berbahaya, hewan/tumbuhan/produk perikanan dan barang khusus hanya dapat diproses bila memenuhi ketentuan hukum, airline dan keamanan penerbangan.']},
+ {title:'PASAL 9 - ASURANSI DAN KLAIM',body:['Asuransi diproses berdasarkan nilai barang dan dokumen pendukung yang diwajibkan. Ketentuan pertanggungan, pengecualian dan penyelesaian klaim mengikuti polis/penanggung.','Klaim kehilangan atau kerusakan wajib didukung dokumen yang relevan seperti invoice barang, foto, PTI, SMU dan bukti serah terima.']},
+ {title:'PASAL 10 - KERAHASIAAN DAN DATA',body:['Para pihak menjaga kerahasiaan harga, data customer, pengirim/konsinyi dan informasi komersial nonpublik.','Data hanya digunakan untuk pelaksanaan layanan, billing, audit, kepatuhan, asuransi, klaim serta fulfillment oleh vendor yang membutuhkan data operasional minimum.']},
+ {title:'PASAL 11 - KEADAAN KAHAR',body:['Keterlambatan atau kegagalan akibat bencana, cuaca ekstrem, gangguan bandara, pembatasan pemerintah, pembatalan penerbangan atau keadaan lain di luar kendali wajar diperlakukan sebagai keadaan kahar sepanjang dapat dibuktikan secara wajar.']},
+ {title:'PASAL 12 - JANGKA WAKTU DAN PENGAKHIRAN',body:['PKS berlaku setelah ditandatangani para pihak sampai tanggal berakhir yang tercantum dan dapat diperpanjang berdasarkan kesepakatan.','Pengakhiran tidak menghapus kewajiban pembayaran, penyelesaian klaim atau kewajiban lain yang telah timbul sebelumnya.']},
+ {title:'PASAL 13 - HUKUM DAN PERSELISIHAN',body:['PKS tunduk pada hukum Republik Indonesia. Perselisihan diselesaikan terlebih dahulu secara musyawarah dengan itikad baik sebelum menempuh forum hukum yang berwenang.']},
+ {title:'PASAL 14 - TANDA TANGAN ELEKTRONIK',body:['PKS dapat ditandatangani secara elektronik menggunakan penyelenggara tanda tangan elektronik tersertifikasi. Audit trail dan sertifikat elektronik menjadi bagian dokumen final.','Pada status DRAFT, REVIEW atau READY_FOR_PRIVY, dokumen belum berlaku. PKS baru aktif setelah seluruh pihak menyelesaikan penandatanganan dan status sistem menjadi ACTIVE.']},
+ {title:'PASAL 15 - PENUTUP',body:['Perubahan material dibuat melalui addendum atau dokumen perubahan yang disetujui para pihak.','PKS dibuat untuk dilaksanakan dengan itikad baik oleh para pihak.']}
+];}
+function publicItem(x){return {id:x.id,customerId:x.customerId,pksNumber:x.pksNumber,version:x.version,status:x.status,generatedAt:x.generatedAt,updatedAt:x.updatedAt,pdfUrl:x.pdfUrl,privyStatus:x.privyStatus};}
+export default async request=>{
+  try{assertIndriSession(request);}catch(e){return json({message:e.message},e.status||401);}
+  const url=new URL(request.url);
+  if(request.method==='GET'){const customerId=clean(url.searchParams.get('customerId'),80);if(!customerId)return json({message:'customerId wajib.'},400);const c=await db().get(customerKey(customerId),{type:'json',consistency:'strong'});if(!c)return json({message:'Customer tidak ditemukan.'},404);if(!c.pksDraftId)return json({item:null});const item=await db().get(pksKey(c.pksDraftId),{type:'json',consistency:'strong'});return json({item:item?publicItem(item):null});}
+  if(request.method!=='POST')return json({message:'Metode tidak diizinkan.'},405);
+  let b;try{b=await request.json();}catch{return json({message:'Data tidak valid.'},400);}
+  const action=clean(b.action,40).toUpperCase(),customerId=clean(b.customerId,80),customer=await db().get(customerKey(customerId),{type:'json',consistency:'strong'});
+  if(!customer)return json({message:'Master PT Pengirim tidak ditemukan.'},404);
+  if(customer.active===false)return json({message:'Customer nonaktif tidak dapat dibuatkan PKS.'},409);
+  const now=new Date().toISOString();
+  if(['GENERATE','REGENERATE'].includes(action)){
+    const existing=customer.pksDraftId?await db().get(pksKey(customer.pksDraftId),{type:'json',consistency:'strong'}):null,id=existing?.id||crypto.randomUUID(),pksNumber=customer.pksNumber||existing?.pksNumber||number(),version=(existing?.version||0)+1,token=crypto.randomBytes(32).toString('hex');
+    const item={id,customerId:customer.id,pksNumber,version,status:'DRAFT',generatedAt:existing?.generatedAt||now,updatedAt:now,privyStatus:'NOT_CONNECTED',firstParty:{legalName:'PT LIBRA JAYA LOGISTIK',domicile:'Kabupaten Jayapura, Papua',signatoryName:'Wahyudi Utomo',signatoryTitle:'Direktur Utama'},secondParty:{legalName:customer.legalName,tradeName:customer.tradeName,nib:customer.nib,npwp:customer.npwp,address:customer.address,pic:customer.pic,phone:customer.phone,email:customer.email,signatoryName:customer.signatoryName||customer.pic,signatoryTitle:customer.signatoryTitle||'Penandatangan yang berwenang (draft)'},commercial:{paymentScheme:customer.paymentScheme,dpPercent:num(customer.dpPercent),creditLimit:num(customer.creditLimit),creditDays:num(customer.creditDays)},effectiveDate:customer.pksDate||'',validUntil:customer.pksValidUntil||'',clauses:clauses(customer),publicDocumentToken:token,audit:[...(existing?.audit||[]),{at:now,by:actor(request),action:`Draft PKS versi ${version} dibuat. Belum berlaku dan belum ditandatangani.`}]};
+    item.pdfUrl=`${new URL(request.url).origin}/.netlify/functions/indri-cgk-pks-pdf?id=${encodeURIComponent(id)}&token=${encodeURIComponent(token)}`;
+    await db().setJSON(pksKey(id),item);Object.assign(customer,{pksNumber,pksStatus:'DRAFT',pksDraftId:id,pksDraftVersion:version,pksDraftPdfUrl:item.pdfUrl,updatedAt:now});await db().setJSON(customerKey(customer.id),customer);return json({ok:true,item:publicItem(item)},201);
+  }
+  if(!customer.pksDraftId)return json({message:'Draft PKS belum dibuat.'},409);
+  const item=await db().get(pksKey(customer.pksDraftId),{type:'json',consistency:'strong'});if(!item)return json({message:'Draft PKS tidak ditemukan.'},404);
+  if(action==='SET_REVIEW'){if(!customer.signatoryName||!customer.signatoryTitle)return json({message:'Nama dan jabatan penandatangan wajib diisi.'},409);item.status='REVIEW';customer.pksStatus='REVIEW';}
+  else if(action==='READY_FOR_PRIVY'){if(item.status!=='REVIEW')return json({message:'PKS harus melalui REVIEW terlebih dahulu.'},409);item.status='READY_FOR_PRIVY';customer.pksStatus='READY_FOR_PRIVY';}
+  else if(action==='BACK_TO_DRAFT'){item.status='DRAFT';customer.pksStatus='DRAFT';}
+  else return json({message:'Action PKS tidak dikenal.'},400);
+  item.updatedAt=now;item.audit=[...(item.audit||[]),{at:now,by:actor(request),action:`Status PKS → ${item.status}.`}];customer.updatedAt=now;await db().setJSON(pksKey(item.id),item);await db().setJSON(customerKey(customer.id),customer);return json({ok:true,item:publicItem(item)});
+};
+export const config={path:'/.netlify/functions/indri-cgk-pks',method:['GET','POST']};
