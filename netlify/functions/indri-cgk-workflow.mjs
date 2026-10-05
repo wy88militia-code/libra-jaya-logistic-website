@@ -1,5 +1,5 @@
 import crypto from 'node:crypto';
-import {db,clean,num,json,assertIndriSession,actor,listPrefix} from './_indri-cgk-core.mjs';
+import {db,clean,num,json,assertIndriSession,actor,listPrefix,creditGateStatus} from './_indri-cgk-core.mjs';
 
 const loaKey=id=>`loa/${id}`;
 const invoiceKey=id=>`invoice/${id}`;
@@ -44,7 +44,7 @@ function stockSummary(stocks=[]){
   };
 }
 function dashboard(data){
-  const customers=data.customers.map(c=>({...c,finance:customerFinance(c.id,data)}));
+  const customers=data.customers.map(c=>({...c,finance:customerFinance(c.id,data),creditGate:creditGateStatus(c,data.invoices)}));
   const stocks=data.stocks.sort((a,b)=>String(b.updatedAt||b.createdAt||'').localeCompare(String(a.updatedAt||a.createdAt||'')));
   const stockMap=new Map(stocks.map(x=>[x.loaId,x]));
   const loas=data.loas.sort((a,b)=>String(b.createdAt||'').localeCompare(String(a.createdAt||''))).map(x=>({
@@ -104,6 +104,8 @@ export default async request=>{
     if(customer.pksStatus!=='ACTIVE')return json({message:'PKS belum ACTIVE.'},409);
     if(customer.paymentScheme==='CREDIT'){
       const fin=customerFinance(customer.id,data),available=Math.max(0,num(customer.creditLimit)-fin.outstanding-fin.committed);
+      const gate=creditGateStatus(customer,data.invoices);
+      if(!gate.active)return json({message:'Fasilitas kredit sedang CREDIT HOLD. Approval LoA ditolak.',code:'CREDIT_HOLD',reasons:gate.reasons},409);
       if(num(loa.total)>available)return json({message:`Plafond kredit tidak cukup. Sisa limit Rp ${Math.round(available).toLocaleString('id-ID')}.`,code:'CREDIT_LIMIT_EXCEEDED'},409);
     }
     loa.status='APPROVED';
