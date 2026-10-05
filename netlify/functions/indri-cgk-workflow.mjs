@@ -4,7 +4,7 @@ import {db,clean,num,json,assertIndriSession,actor,listPrefix} from './_indri-cg
 const loaKey=id=>`loa/${id}`;
 const invoiceKey=id=>`invoice/${id}`;
 const stockKey=id=>`stock/${id}`;
-const openCommitStatuses=new Set(['APPROVED','RECEIVED','PACKED','AIRLINE_BOOKED','SMU_ISSUED','DEPARTED','ARRIVED']);
+const openCommitStatuses=new Set(['APPROVED','RECEIVED','PACKED','AIRLINE_BOOKED','SMU_ISSUED','DEPARTED','ARRIVED','RELEASED']);
 const activeStockStatuses=new Set(['RECEIVED','PACKING','READY_TO_BOOK','BOOKED','SMU_ISSUED','DEPARTED','ARRIVED']);
 
 function invoiceBalance(inv){
@@ -14,7 +14,7 @@ function invoiceBalance(inv){
 function customerFinance(customerId,data){
   const inv=data.invoices.filter(x=>x.customerId===customerId);
   const outstanding=inv.reduce((s,x)=>s+invoiceBalance(x).outstanding,0);
-  const committed=data.loas.filter(x=>x.customerId===customerId&&openCommitStatuses.has(x.status)).reduce((s,x)=>s+num(x.total),0);
+  const committed=data.loas.filter(x=>x.customerId===customerId&&openCommitStatuses.has(x.status)&&!x.invoiceId).reduce((s,x)=>s+num(x.total),0);
   const customer=data.customers.find(x=>x.id===customerId),limit=num(customer?.creditLimit),exposure=outstanding+committed;
   return {outstanding,committed,exposure,availableCredit:Math.max(0,limit-exposure)};
 }
