@@ -1,0 +1,147 @@
+<!doctype html>
+<html lang="id">
+<head>
+  <meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="robots" content="noindex,nofollow"><meta name="theme-color" content="#082b50">
+  <title>Admin Indri CGK · PT Libra Jaya Logistik</title>
+  <link rel="stylesheet" href="/admin-indri-cgk.css?v=20261005-2">
+</head>
+<body>
+<header>
+  <a class="admin-brand" href="/admin-indri-cgk"><img src="/logo-libra-jaya.webp" alt="PT Libra Jaya Logistik"><span class="admin-mark">CGK</span></a>
+  <div class="hub-label"><b>ADMIN INDRI · CGK PTP</b><span>PT Libra Jaya Logistik · Super Admin Libra</span></div>
+</header>
+<main>
+<section id="app">
+  <section class="hero panel">
+    <div><p class="eyebrow">PT LIBRA JAYA LOGISTIK · HUB CGK · PORT TO PORT</p><h1>CGK PTP Tools</h1><p>Alur transaksi terkontrol dari PKS sampai pelunasan invoice.</p></div>
+    <div class="scope"><b>Flow wajib</b><span>PKS → LoA → Ops → Invoice</span><small>Setiap tahap terkunci berurutan.</small></div>
+  </section>
+
+  <nav class="tabs" aria-label="Menu">
+    <button class="tab active" data-panel="dashboard">Dashboard</button>
+    <button class="tab" data-panel="customers">1 · Master & PKS</button>
+    <button class="tab" data-panel="loa">2 · Buat LoA</button>
+    <button class="tab" data-panel="flow">3 · Operasional</button>
+    <button class="tab" data-panel="finance">4 · Invoice & Piutang</button>
+    <button class="tab" data-panel="shipper">Master Pengirim</button>
+    <button class="tab" data-panel="consignee">Master Konsinyi</button>
+  </nav>
+
+  <section class="panel workspace active" data-workspace="dashboard">
+    <div class="section-head"><div><p class="eyebrow">CONTROL TOWER</p><h2>Ringkasan CGK PTP</h2></div><button class="secondary" id="refresh-all">Muat ulang</button></div>
+    <div class="kpis">
+      <div><span>Pelanggan aktif</span><b id="kpi-customer">0</b></div>
+      <div><span>Menunggu approval</span><b id="kpi-approval">0</b></div>
+      <div><span>Dalam proses</span><b id="kpi-process">0</b></div>
+      <div><span>Invoice terbuka</span><b id="kpi-invoice">0</b></div>
+      <div class="wide-kpi"><span>Total piutang</span><b id="kpi-ar">Rp 0</b></div>
+    </div>
+    <div class="flow-strip">
+      <span>Master PT + PKS</span><i>→</i><span>LoA</span><i>→</i><span>Disetujui</span><i>→</i><span>Terima Barang</span><i>→</i><span>Packing</span><i>→</i><span>Booking Airline</span><i>→</i><span>SMU</span><i>→</i><span>Invoice</span><i>→</i><span>Pelunasan</span>
+    </div>
+    <div id="dashboard-alerts" class="master-list"></div>
+  </section>
+
+  <section class="panel workspace" data-workspace="customers">
+    <div class="section-head"><div><p class="eyebrow">MASTER BILLING PARTY</p><h2>Master PT Pengirim & PKS Libra</h2></div><button class="secondary" id="add-customer">+ Tambah PT / PKS</button></div>
+    <p class="help">Satu master menyimpan identitas PT Pengirim, PKS dengan PT Libra Jaya Logistik, skema CASH / DP / KREDIT, plafond dan termin kredit. Draft PKS dibuat dari data ini, direview, lalu disiapkan untuk PrivyID pada tahap berikutnya.</p>
+    <div id="customer-list" class="master-list"></div>
+  </section>
+
+  <section class="panel workspace" data-workspace="loa">
+    <div class="section-head"><div><p class="eyebrow">PENAWARAN</p><h2>Buat Letter of Acceptance</h2></div><span class="badge">Harga JL Master / SSOT</span></div>
+    <form id="loa-form">
+      <div class="grid">
+        <label>PT Pengirim / Customer PKS *<select name="customerId" required><option value="">Pilih customer</option></select></label>
+        <label>Master Pengirim operasional *<select name="shipperId" required><option value="">Pilih pengirim</option></select></label>
+        <label>Master Konsinyi *<select name="consigneeId" required><option value="">Pilih konsinyi</option></select></label>
+        <label>Bandara tujuan *<select name="destinationAirport" required><option value="">Pilih tujuan</option></select></label>
+        <label>Jumlah koli *<input name="pieces" type="number" min="1" value="1" required></label>
+        <label>Berat aktual total (kg) *<input name="actualWeight" type="number" min=".1" step=".1" required></label>
+        <label class="wide">Isi barang *<textarea name="contents" required></textarea></label>
+        <label>Kategori<input name="category"></label>
+        <label>Nilai barang (Rp)<input name="declaredValue" type="number" min="0" step="1000"></label>
+        <label>Packing kayu<select name="woodPacking"><option value="NO">Tidak</option><option value="YES">Ya</option></select></label>
+        <label>Kode promo<input name="promoCode"></label>
+        <label>Berlaku sampai<input name="validUntil" type="date"></label>
+        <div class="wide subbox"><h3>Dimensi per koli</h3><div id="package-rows"></div></div>
+        <label class="wide">Catatan / syarat khusus<textarea name="terms"></textarea></label>
+      </div>
+      <div id="customer-preview" class="payment-preview">Pilih PT Pengirim / Customer untuk melihat PKS dan skema pembayaran.</div>
+      <div class="party-preview two-col"><div class="subbox"><h3>Pengirim</h3><div id="shipper-preview" class="preview">Belum dipilih.</div></div><div class="subbox"><h3>Konsinyi</h3><div id="consignee-preview" class="preview">Belum dipilih.</div></div></div>
+      <div class="action-bar"><button type="submit" class="primary" id="issue-loa">Buat LoA · Menunggu Approval</button><span id="loa-status"></span></div>
+    </form>
+    <section id="loa-result" class="result" hidden></section>
+  </section>
+
+  <section class="panel workspace" data-workspace="flow">
+    <div class="section-head"><div><p class="eyebrow">OPERATIONAL PIPELINE</p><h2>LoA → SMU → Invoice</h2></div><button class="secondary" id="refresh-flow">Muat ulang</button></div>
+    <div class="status-legend"><span>PENDING APPROVAL</span><span>APPROVED</span><span>RECEIVED</span><span>PACKED</span><span>AIRLINE BOOKED</span><span>SMU ISSUED</span><span>INVOICED</span></div>
+    <div id="flow-list" class="master-list"></div>
+  </section>
+
+  <section class="panel workspace" data-workspace="finance">
+    <div class="section-head"><div><p class="eyebrow">FINANCE CONTROL</p><h2>Invoice, Tagihan & Saldo Piutang</h2></div><button class="secondary" id="refresh-finance">Muat ulang</button></div>
+    <div id="credit-summary" class="master-list"></div>
+    <h3 class="subheading">Daftar Invoice</h3>
+    <div id="invoice-list" class="master-list"></div>
+  </section>
+
+  <section class="panel workspace" data-workspace="shipper">
+    <div class="section-head"><div><p class="eyebrow">MASTER OPERASIONAL</p><h2>Master Pengirim</h2></div><button class="secondary add-master" data-type="SHIPPER">+ Tambah Pengirim</button></div>
+    <div id="shipper-list" class="master-list"></div>
+  </section>
+
+  <section class="panel workspace" data-workspace="consignee">
+    <div class="section-head"><div><p class="eyebrow">MASTER OPERASIONAL</p><h2>Master Konsinyi</h2></div><button class="secondary add-master" data-type="CONSIGNEE">+ Tambah Konsinyi</button></div>
+    <div id="consignee-list" class="master-list"></div>
+  </section>
+</section>
+</main>
+
+<dialog id="customer-dialog"><form method="dialog" id="customer-form">
+  <input type="hidden" name="id"><div class="dialog-head"><div><p class="eyebrow">MASTER PT & PKS</p><h2 id="customer-title">Customer</h2></div><button value="cancel" class="icon">×</button></div>
+  <div class="grid">
+    <label>Kode customer<input name="customerCode" placeholder="Otomatis"></label>
+    <label>Nama PT / Pengirim *<input name="legalName" required></label>
+    <label>Nama dagang<input name="tradeName"></label>
+    <label>NIB<input name="nib"></label><label>NPWP<input name="npwp"></label>
+    <label>PIC *<input name="pic" required></label><label>No. HP *<input name="phone" required></label><label>Email<input name="email" type="email"></label>
+    <label>Nama penandatangan PKS<input name="signatoryName" placeholder="Direktur / pihak berwenang"></label><label>Jabatan penandatangan<input name="signatoryTitle" placeholder="Direktur Utama / Direktur"></label>
+    <label class="wide">Alamat *<textarea name="address" required></textarea></label>
+    <label>No. PKS Libra<input name="pksNumber"></label><label>Tanggal PKS<input name="pksDate" type="date"></label><label>Berlaku sampai<input name="pksValidUntil" type="date"></label>
+    <label>Status PKS<input name="pksStatus" value="DRAFT" readonly></label>
+    <label>Skema pembayaran<select name="paymentScheme"><option>CASH</option><option>DP</option><option>CREDIT</option></select></label>
+    <label>DP (%)<input name="dpPercent" type="number" min="0" max="100" step="1"></label>
+    <label>Plafond kredit (Rp)<input name="creditLimit" type="number" min="0" step="1000"></label>
+    <label>Termin kredit (hari)<input name="creditDays" type="number" min="0" max="365"></label>
+    <label class="wide">Catatan<textarea name="notes"></textarea></label>
+    <label class="toggle"><input name="active" type="checkbox" checked> Customer aktif</label>
+  </div>
+  <div class="actions"><button value="cancel" class="ghost">Batal</button><button type="submit" value="default" class="primary">Simpan Master & PKS</button></div><p id="customer-status"></p>
+</form></dialog>
+
+<dialog id="workflow-dialog"><form method="dialog" id="workflow-form">
+  <input type="hidden" name="action"><input type="hidden" name="loaId"><input type="hidden" name="invoiceId">
+  <div class="dialog-head"><div><p class="eyebrow">WORKFLOW</p><h2 id="workflow-title">Proses</h2></div><button value="cancel" class="icon">×</button></div>
+  <div id="workflow-fields" class="grid"></div>
+  <div class="actions"><button value="cancel" class="ghost">Batal</button><button type="submit" value="default" class="primary">Simpan & Lanjutkan</button></div><p id="workflow-status"></p>
+</form></dialog>
+
+<dialog id="master-dialog"><form method="dialog" id="master-form">
+  <input type="hidden" name="id"><input type="hidden" name="type">
+  <div class="dialog-head"><div><p class="eyebrow">MASTER DATA</p><h2 id="master-title">Master</h2></div><button value="cancel" class="icon">×</button></div>
+  <div class="grid">
+    <label>Kode<input name="code" placeholder="Otomatis"></label><label>Nama *<input name="name" required></label><label>Perusahaan<input name="company"></label>
+    <label>PIC<input name="pic"></label><label>No. HP *<input name="phone" required></label><label>Email<input name="email" type="email"></label>
+    <label>Provinsi<input name="province"></label><label>Kota/Kabupaten<input name="city"></label><label>Kecamatan<input name="district"></label>
+    <label>Kelurahan<input name="village"></label><label>Kode Pos<input name="postalCode"></label><label>Bandara/IATA<input name="airport" maxlength="3"></label>
+    <label class="wide">Alamat lengkap *<textarea name="address" required></textarea></label><label class="wide">Catatan operasional<textarea name="notes"></textarea></label>
+    <label class="toggle"><input name="active" type="checkbox" checked> Aktif</label>
+  </div>
+  <div class="actions"><button value="cancel" class="ghost">Batal</button><button type="submit" value="default" class="primary">Simpan Master</button></div><p id="master-status"></p>
+</form></dialog>
+
+<script src="/admin-indri-cgk.js?v=20261005-libra1"></script>
+</body></html>
