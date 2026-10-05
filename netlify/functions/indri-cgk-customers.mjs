@@ -70,7 +70,26 @@ export default async request=>{
       existing=await db().get(key(id),{type:'json',consistency:'strong'});
       if(!existing)return json({message:'Master pelanggan tidak ditemukan.'},404);
     }
-    const item=normalize(b,existing),error=validate(item);if(error)return json({message:error},400);
+    const item=normalize(b,existing);
+    if(existing.id){
+      const creditTermsChanged=item.paymentScheme!==existing.paymentScheme||num(item.creditLimit)!==num(existing.creditLimit)||num(item.creditDays)!==num(existing.creditDays);
+      const ownerChanged=clean(item.ownerName)!==clean(existing.ownerName)||clean(item.ownerNik)!==clean(existing.ownerNik);
+      const directorChanged=Boolean(item.directorSameAsOwner)!==Boolean(existing.directorSameAsOwner)||clean(item.directorName)!==clean(existing.directorName)||clean(item.directorNik)!==clean(existing.directorNik);
+      if(existing.pksStatus==='ACTIVE'&&creditTermsChanged)return json({message:'Skema/plafond/termin pada PKS ACTIVE tidak boleh diubah langsung dari Master. Gunakan addendum/credit review agar audit trail tetap sah.'},409);
+      if(item.paymentScheme==='CREDIT'&&(ownerChanged||creditTermsChanged)){
+        item.ownerPgStatus='NOT_CREATED';delete item.ownerPgDocument;
+        item.creditApprovalStatus='HOLD';
+      }
+      if(item.paymentScheme==='CREDIT'&&(directorChanged||creditTermsChanged)){
+        item.directorPgStatus=item.directorSameAsOwner?'NOT_REQUIRED':'NOT_CREATED';delete item.directorPgDocument;
+        item.creditApprovalStatus='HOLD';
+      }
+      if(existing.paymentScheme!=='CREDIT'&&item.paymentScheme==='CREDIT'){
+        item.ownerPgStatus='NOT_CREATED';item.directorPgStatus=item.directorSameAsOwner?'NOT_REQUIRED':'NOT_CREATED';item.creditApprovalStatus='PENDING';
+        delete item.ownerPgDocument;delete item.directorPgDocument;
+      }
+    }
+    const error=validate(item);if(error)return json({message:error},400);
     if(!item.customerCode)item.customerCode='CUS-CGK-'+String(Date.now()).slice(-7);
     await db().setJSON(key(item.id),item);
     return json({ok:true,item},request.method==='POST'?201:200);
